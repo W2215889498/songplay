@@ -4,8 +4,6 @@
 
 #include "bsp/esp-bsp.h"
 #include "esp_heap_caps.h"
-#include "esp_h264_dec.h"
-#include "esp_h264_dec_sw.h"
 #include "esp_h264_enc_single.h"
 #include "esp_h264_enc_single_hw.h"
 #include "esp_lcd_panel_ops.h"
@@ -15,6 +13,8 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "lwip/sockets.h"
+#include "wels_dec.h"
+#include "xc_airplay.h"
 #include "xc_crypto.h"
 
 static const char *TAG = "xc_video";
@@ -27,20 +27,54 @@ static const char *TAG = "xc_video";
 #define PANEL_W 480
 #define PANEL_H 800
 
-static uint8_t *s_body;   /* PSRAM */
-static uint8_t *s_plain;  /* PSRAM */
-static uint8_t *s_annexb; /* PSRAM */
-static uint16_t *s_rgb;   /* PSRAM */
-static uint8_t s_key[32];
+#define STREAM_TYPE_MAIN_SCREEN 110
+#define STREAM_TYPE_ALT_SCREEN 111
+
+/* Two data streams arrive in parallel: the CarPlay main screen (110) and the
+ * instrument-cluster/alt screen (111). The P4 has one panel and this product
+ * shows the cluster, so channel 1 decodes and renders, channel 0 only drains
+ * its socket (the phone keeps streaming to both). */
+typedef struct {
+    uint16_t type;
+    bool display;
+    int listen_fd;
+    int conn_fd;
+    uint8_t key[32];
+    uint64_t counter;
+    wels_dec_t *dec;
+    volatile bool dec_ready;
+    bool has_config;
+    int nal_length_size;
+    int video_w, video_h;
+    volatile uint32_t frames;
+    TaskHandle_t task;
+} video_chan_t;
+
+static video_chan_t s_ch[2];
 static volatile bool s_running;
-static volatile bool s_has_config;
-static volatile uint32_t s_frames;
-static uint64_t s_counter;
-static int s_listen_fd = -1;
-static int s_conn_fd = -1;
-static esp_h264_dec_handle_t s_dec;
-static int s_nal_length_size = 4;
-static int s_video_w, s_video_h;
+static bool s_cluster_activated;
+
+/* Asking the phone to render the cluster map (showUI + forceKeyFrame) is only
+ * valid once the main screen stream is up (LIVI gates on mainStreamReady) and
+ * the cluster stream sent its codec config. */
+static void maybe_activate_cluster(void)
+{
+    if (s_cluster_activated) {
+        return;
+    }
+    if (s_ch[0].conn_fd < 0 || !s_ch[1].has_config) {
+        return;
+    }
+    if (xc_airplay_cluster_map_enable() == ESP_OK) {
+        s_cluster_activated = true;
+        ESP_LOGI(TAG, "cluster map activated (showUI + forceKeyFrame)");
+    }
+}
+
+static uint8_t *s_body;   /* PSRAM, cluster channel only */
+static uint8_t *s_plain;  /* PSRAM, cluster channel only */
+static uint8_t *s_annexb; /* PSRAM, cluster channel only */
+static uint16_t *s_rgb;   /* PSRAM */
 static bool s_ui_cleared;
 
 static int recv_all(int fd, uint8_t *out, size_t len)
@@ -73,7 +107,7 @@ static size_t to_annexb(const uint8_t *in, size_t len, int length_size, uint8_t 
         for (int i = 0; i < length_size; i++) {
             nalu = (nalu << 8) | in[r + i];
         }
-        r += length_size;
+        r += (size_t)length_size;
         if (nalu == 0 || r + nalu > len || w + 4 + nalu > cap) {
             break;
         }
@@ -131,86 +165,87 @@ static size_t avcc_to_annexb(const uint8_t *avcc, size_t len, uint8_t *out, size
     return w;
 }
 
-static void feed_decoder(const uint8_t *data, size_t len)
+static void render_frame(video_chan_t *ch, int w, int h, int decode_ms)
 {
-    if (s_dec == NULL) {
+    const uint8_t *y_plane = wels_dec_plane(ch->dec, 0);
+    const uint8_t *u_plane = wels_dec_plane(ch->dec, 1);
+    const uint8_t *v_plane = wels_dec_plane(ch->dec, 2);
+    int y_stride = wels_dec_stride(ch->dec, 0);
+    int uv_stride = wels_dec_stride(ch->dec, 1);
+    if (y_plane == NULL || u_plane == NULL || v_plane == NULL || y_stride <= 0 || uv_stride <= 0) {
         return;
     }
-    esp_h264_dec_in_frame_t in = {
-        .raw_data = { .buffer = (uint8_t *)data, .len = (uint32_t)len },
-    };
-    esp_h264_dec_out_frame_t out = { 0 };
-    int guard = 0;
-    while (in.raw_data.len > 0 && guard++ < 64) {
-        esp_h264_err_t err = esp_h264_dec_process(s_dec, &in, &out);
-        if (err != ESP_H264_ERR_OK) {
-            break;
-        }
-        if (in.consume == 0) {
-            break;
-        }
-        if (out.out_size == 0 || out.outbuf == NULL) {
-            in.raw_data.buffer += in.consume;
-            in.raw_data.len -= in.consume;
-            continue;
-        }
+    int64_t t_render = esp_timer_get_time();
 
-        if (s_video_w == 0 || s_video_h == 0) {
-            esp_h264_dec_param_sw_handle_t param = NULL;
-            if (esp_h264_dec_sw_get_param_hd(s_dec, &param) == ESP_H264_ERR_OK && param) {
-                esp_h264_resolution_t res = { 0 };
-                if (esp_h264_dec_get_resolution(param, &res) == ESP_H264_ERR_OK) {
-                    s_video_w = res.width;
-                    s_video_h = res.height;
-                    ESP_LOGI(TAG, "decoded resolution %dx%d", s_video_w, s_video_h);
-                }
+    for (int y = 0; y < h; y++) {
+        const uint8_t *yr = y_plane + (size_t)y * (size_t)y_stride;
+        const uint8_t *ur = u_plane + (size_t)(y / 2) * (size_t)uv_stride;
+        const uint8_t *vr = v_plane + (size_t)(y / 2) * (size_t)uv_stride;
+        for (int x = 0; x < w; x++) {
+            int yv = yr[x] - 16;
+            int uv = ur[x / 2] - 128;
+            int vv = vr[x / 2] - 128;
+            if (yv < 0) {
+                yv = 0;
             }
+            int r = (298 * yv + 409 * vv + 128) >> 8;
+            int g = (298 * yv - 100 * uv - 208 * vv + 128) >> 8;
+            int b = (298 * yv + 516 * uv + 128) >> 8;
+            if (r < 0) r = 0; else if (r > 255) r = 255;
+            if (g < 0) g = 0; else if (g > 255) g = 255;
+            if (b < 0) b = 0; else if (b > 255) b = 255;
+            s_rgb[(size_t)y * w + x] =
+                (uint16_t)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
         }
+    }
 
-        if (s_video_w > 0 && s_video_h > 0 && s_video_w <= PANEL_W && s_video_h <= PANEL_H &&
-            s_rgb != NULL) {
-            const uint8_t *y_plane = out.outbuf;
-            const uint8_t *u_plane = y_plane + s_video_w * s_video_h;
-            const uint8_t *v_plane = u_plane + (s_video_w / 2) * (s_video_h / 2);
-            int uw = s_video_w / 2;
-            for (int y = 0; y < s_video_h; y++) {
-                for (int x = 0; x < s_video_w; x++) {
-                    int yv = y_plane[y * s_video_w + x] - 16;
-                    int uv = u_plane[(y / 2) * uw + (x / 2)] - 128;
-                    int vv = v_plane[(y / 2) * uw + (x / 2)] - 128;
-                    if (yv < 0) {
-                        yv = 0;
-                    }
-                    int r = (298 * yv + 409 * vv + 128) >> 8;
-                    int g = (298 * yv - 100 * uv - 208 * vv + 128) >> 8;
-                    int b = (298 * yv + 516 * uv + 128) >> 8;
-                    if (r < 0) r = 0; else if (r > 255) r = 255;
-                    if (g < 0) g = 0; else if (g > 255) g = 255;
-                    if (b < 0) b = 0; else if (b > 255) b = 255;
-                    s_rgb[y * s_video_w + x] =
-                        (uint16_t)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
-                }
-            }
+    esp_lcd_panel_handle_t panel = bsp_display_get_panel_handle();
+    int x0 = (PANEL_W - w) / 2;
+    int y0 = (PANEL_H - h) / 2;
+    bsp_display_lock(-1);
+    if (!s_ui_cleared) {
+        lv_obj_clean(lv_screen_active()); /* stop LVGL from overdrawing */
+        s_ui_cleared = true;
+    }
+    esp_lcd_panel_draw_bitmap(panel, x0, y0, x0 + w, y0 + h, s_rgb);
+    bsp_display_unlock();
 
-            esp_lcd_panel_handle_t panel = bsp_display_get_panel_handle();
-            int x0 = (PANEL_W - s_video_w) / 2;
-            int y0 = (PANEL_H - s_video_h) / 2;
-            bsp_display_lock(-1);
-            if (!s_ui_cleared) {
-                lv_obj_clean(lv_screen_active()); /* stop LVGL from overdrawing */
-                s_ui_cleared = true;
-            }
-            esp_lcd_panel_draw_bitmap(panel, x0, y0, x0 + s_video_w, y0 + s_video_h, s_rgb);
-            bsp_display_unlock();
-        }
-
-        s_frames++;
-        in.raw_data.buffer += in.consume;
-        in.raw_data.len -= in.consume;
+    if (ch->frames < 20) {
+        ESP_LOGI(TAG, "ch%u frame %u timing: decode %d ms, render %d ms", (unsigned)ch->type,
+                 (unsigned)ch->frames, decode_ms, (int)((esp_timer_get_time() - t_render) / 1000));
     }
 }
 
-static void handle_message(const uint8_t *header, size_t body_len)
+static void feed_decoder(video_chan_t *ch, const uint8_t *data, size_t len)
+{
+    if (ch->dec == NULL || len == 0) {
+        return;
+    }
+    int64_t t_decode = esp_timer_get_time();
+    if (wels_dec_decode(ch->dec, data, len) != 1) {
+        return; /* parameter sets / partial access unit, no picture yet */
+    }
+    int decode_ms = (int)((esp_timer_get_time() - t_decode) / 1000);
+
+    int w = wels_dec_width(ch->dec);
+    int h = wels_dec_height(ch->dec);
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    if (ch->video_w != w || ch->video_h != h) {
+        ch->video_w = w;
+        ch->video_h = h;
+        ESP_LOGI(TAG, "ch%u decoded resolution %dx%d", (unsigned)ch->type, w, h);
+    }
+    if (!ch->display || w > PANEL_W || h > PANEL_H || s_rgb == NULL) {
+        ch->frames++;
+        return;
+    }
+    render_frame(ch, w, h, decode_ms);
+    ch->frames++;
+}
+
+static void handle_message(video_chan_t *ch, const uint8_t *header, size_t body_len)
 {
     uint8_t opcode = header[4];
     if (opcode == OP_VIDEO_CONFIG) {
@@ -223,7 +258,7 @@ static void handle_message(const uint8_t *header, size_t body_len)
                 avcc = s_body + i + 4;
                 avcc_len = body_len - (i + 4);
                 if (avcc_len >= 5) {
-                    s_nal_length_size = (avcc[4] & 3) + 1;
+                    ch->nal_length_size = (avcc[4] & 3) + 1;
                 }
                 break;
             }
@@ -232,107 +267,175 @@ static void handle_message(const uint8_t *header, size_t body_len)
                 break;
             }
         }
-        s_has_config = true;
-        ESP_LOGI(TAG, "video config: %s, %u bytes (avcC %u), NAL length size %d", codec,
-                 (unsigned)body_len, (unsigned)avcc_len, s_nal_length_size);
+        /* The iPhone sends the raw avcC record (configurationVersion == 1 as
+         * the first payload byte), not the 4-byte + "avcC" framing the PC
+         * test tool uses. */
+        if (avcc == NULL && body_len >= 7 && s_body[0] == 1) {
+            codec = "h264";
+            avcc = s_body;
+            avcc_len = body_len;
+            ch->nal_length_size = (avcc[4] & 3) + 1;
+        }
+        ch->has_config = true;
+        ch->dec_ready = false;
+        ESP_LOGI(TAG, "ch%u video config: %s, %u bytes (avcC %u), NAL length size %d",
+                 (unsigned)ch->type, codec, (unsigned)body_len, (unsigned)avcc_len,
+                 ch->nal_length_size);
+        maybe_activate_cluster();
 
         if (avcc != NULL) {
             /* Rebuild the decoder per stream: the parameter sets arrive with
              * every SETUP and a stale decoder will never activate them. */
-            if (s_dec != NULL) {
-                esp_h264_dec_close(s_dec);
-                esp_h264_dec_del(s_dec);
-                s_dec = NULL;
+            if (ch->dec != NULL) {
+                wels_dec_destroy(ch->dec);
+                ch->dec = NULL;
             }
-            s_video_w = 0;
-            s_video_h = 0;
-            esp_h264_dec_cfg_sw_t cfg = { .pic_type = ESP_H264_RAW_FMT_I420 };
-            if (esp_h264_dec_sw_new(&cfg, &s_dec) == ESP_H264_ERR_OK &&
-                esp_h264_dec_open(s_dec) == ESP_H264_ERR_OK) {
+            ch->video_w = 0;
+            ch->video_h = 0;
+            ch->dec = wels_dec_create();
+            if (ch->dec != NULL) {
                 size_t n = avcc_to_annexb(avcc, avcc_len, s_annexb, BODY_MAX);
-                ESP_LOGI(TAG, "decoder ready; feeding %u bytes of SPS/PPS", (unsigned)n);
-                feed_decoder(s_annexb, n);
+                ESP_LOGI(TAG, "ch%u openh264 decoder ready; feeding %u bytes of SPS/PPS",
+                         (unsigned)ch->type, (unsigned)n);
+                if (n > 0) {
+                    feed_decoder(ch, s_annexb, n);
+                    ch->dec_ready = true;
+                }
             } else {
-                ESP_LOGE(TAG, "H.264 decoder init failed");
-                s_dec = NULL;
+                ESP_LOGE(TAG, "ch%u openh264 decoder init failed", (unsigned)ch->type);
+                ch->dec = NULL;
             }
         }
         return;
     }
     if (opcode != OP_VIDEO_FRAME) {
-        ESP_LOGW(TAG, "unknown video opcode %u (%u bytes)", opcode, (unsigned)body_len);
+        ESP_LOGW(TAG, "ch%u unknown video opcode %u (%u bytes)", (unsigned)ch->type, opcode,
+                 (unsigned)body_len);
         return;
     }
 
     uint8_t nonce[12];
-    nonce64(s_counter, nonce);
+    nonce64(ch->counter, nonce);
     if (body_len < TAG_LEN) {
-        s_counter++;
+        ch->counter++;
         return;
     }
     size_t ct_len = body_len - TAG_LEN;
-    if (xc_chacha20poly1305_open(s_key, nonce, header, HEADER_LEN, s_body, ct_len, s_body + ct_len,
-                                 s_plain) != ESP_OK) {
-        ESP_LOGW(TAG, "frame %u: decrypt failed", (unsigned)s_counter);
-        s_counter++;
+    if (xc_chacha20poly1305_open(ch->key, nonce, header, HEADER_LEN, s_body, ct_len,
+                                 s_body + ct_len, s_plain) != ESP_OK) {
+        ESP_LOGW(TAG, "ch%u frame %u: decrypt failed", (unsigned)ch->type,
+                 (unsigned)ch->counter);
+        ch->counter++;
         return;
     }
-    s_counter++;
+    ch->counter++;
 
-    size_t n = to_annexb(s_plain, ct_len, s_nal_length_size, s_annexb, BODY_MAX);
-    if (s_frames < 3) {
-        ESP_LOGI(TAG, "frame %u: %u sealed -> %u annex-b", (unsigned)s_frames, (unsigned)body_len,
-                 (unsigned)n);
-    }
-    if (n > 0) {
+    size_t n = to_annexb(s_plain, ct_len, ch->nal_length_size, s_annexb, BODY_MAX);
+    if (ch->dec_ready) {
         int64_t t0 = esp_timer_get_time();
-        feed_decoder(s_annexb, n);
-        if (s_frames < 3) {
-            ESP_LOGI(TAG, "frame %u: decoded in %d ms", (unsigned)s_frames,
+        feed_decoder(ch, s_annexb, n);
+        if (ch->frames < 3) {
+            ESP_LOGI(TAG, "ch%u frame %u: %u sealed -> %u annex-b, total %d ms",
+                     (unsigned)ch->type, (unsigned)ch->frames, (unsigned)body_len, (unsigned)n,
                      (int)((esp_timer_get_time() - t0) / 1000));
         }
+    } else if (ch->frames == 0 && ch->has_config == false) {
+        /* Frames before the config would be dropped anyway. */
     }
+}
+
+/* Drain-only channel: the phone streams to it, we just keep the socket fed.
+ * No decryption is needed, so no per-frame state. */
+static void drain_conn(int fd)
+{
+    uint8_t header[HEADER_LEN];
+    uint8_t scratch[4096];
+    uint32_t frames = 0;
+    while (s_running) {
+        if (recv_all(fd, header, HEADER_LEN) != 0) {
+            break;
+        }
+        size_t body_len = (size_t)header[0] | ((size_t)header[1] << 8) |
+                          ((size_t)header[2] << 16) | ((size_t)header[3] << 24);
+        if (body_len > BODY_MAX) {
+            break;
+        }
+        while (body_len > 0) {
+            size_t chunk = body_len > sizeof(scratch) ? sizeof(scratch) : body_len;
+            if (recv_all(fd, scratch, chunk) != 0) {
+                return;
+            }
+            body_len -= chunk;
+        }
+        frames++;
+    }
+    ESP_LOGW(TAG, "main stream drained (%u messages)", (unsigned)frames);
 }
 
 static void video_task(void *arg)
 {
+    video_chan_t *ch = (video_chan_t *)arg;
     while (s_running) {
         struct sockaddr_in src;
         socklen_t sl = sizeof(src);
-        int fd = accept(s_listen_fd, (struct sockaddr *)&src, &sl);
+        int fd = accept(ch->listen_fd, (struct sockaddr *)&src, &sl);
         if (fd < 0) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
-        s_conn_fd = fd;
-        s_counter = 0; /* the phone restarts the frame counter per connection */
-        ESP_LOGI(TAG, "video stream connected");
+        ch->conn_fd = fd;
+        ch->counter = 0; /* the phone restarts the frame counter per connection */
+        ch->dec_ready = false;
+        ESP_LOGI(TAG, "ch%u video stream connected", (unsigned)ch->type);
+        maybe_activate_cluster();
 
-        static uint8_t header[HEADER_LEN];
+        if (!ch->display) {
+            drain_conn(fd);
+            close(fd);
+            ch->conn_fd = -1;
+            continue;
+        }
+
+        uint8_t header[HEADER_LEN];
         while (s_running) {
             if (recv_all(fd, header, HEADER_LEN) != 0) {
                 break;
             }
             size_t body_len = (size_t)header[0] | ((size_t)header[1] << 8) |
                               ((size_t)header[2] << 16) | ((size_t)header[3] << 24);
-            if (body_len == 0 || body_len > BODY_MAX) {
+            if (body_len > BODY_MAX) {
                 ESP_LOGW(TAG, "bad body length %u", (unsigned)body_len);
                 break;
+            }
+            if (body_len == 0) {
+                /* Zero-length control/keep-alive message from the phone. */
+                continue;
             }
             if (recv_all(fd, s_body, body_len) != 0) {
                 break;
             }
-            handle_message(header, body_len);
+            handle_message(ch, header, body_len);
         }
         close(fd);
-        s_conn_fd = -1;
-        ESP_LOGW(TAG, "video stream disconnected (%u frames)", (unsigned)s_frames);
+        ch->conn_fd = -1;
+        ESP_LOGW(TAG, "ch%u video stream disconnected (%u frames)", (unsigned)ch->type,
+                 (unsigned)ch->frames);
     }
     vTaskDelete(NULL);
 }
 
-esp_err_t xc_video_start(const uint8_t key[32], uint16_t *out_port)
+static video_chan_t *chan_for_type(uint16_t type)
 {
+    if (type == STREAM_TYPE_ALT_SCREEN) {
+        return &s_ch[1];
+    }
+    return &s_ch[0];
+}
+
+esp_err_t xc_video_start(uint16_t type, const uint8_t key[32], uint16_t *out_port)
+{
+    video_chan_t *ch = chan_for_type(type);
+
     if (s_body == NULL) {
         s_body = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         s_plain = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -342,11 +445,15 @@ esp_err_t xc_video_start(const uint8_t key[32], uint16_t *out_port)
     if (s_body == NULL || s_plain == NULL || s_annexb == NULL || s_rgb == NULL) {
         return ESP_ERR_NO_MEM;
     }
-    memcpy(s_key, key, 32);
-    s_frames = 0;
-    s_has_config = false;
 
-    if (s_listen_fd < 0) {
+    ch->type = type;
+    ch->display = (type == STREAM_TYPE_ALT_SCREEN); /* the cluster is what we show */
+    memcpy(ch->key, key, 32);
+    ch->frames = 0;
+    ch->has_config = false;
+    ch->conn_fd = -1;
+
+    if (ch->listen_fd <= 0) {
         int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (fd < 0) {
             return ESP_FAIL;
@@ -362,47 +469,51 @@ esp_err_t xc_video_start(const uint8_t key[32], uint16_t *out_port)
             close(fd);
             return ESP_FAIL;
         }
-        s_listen_fd = fd;
+        ch->listen_fd = fd;
     }
 
     struct sockaddr_in bound;
     socklen_t bl = sizeof(bound);
-    if (getsockname(s_listen_fd, (struct sockaddr *)&bound, &bl) != 0) {
+    if (getsockname(ch->listen_fd, (struct sockaddr *)&bound, &bl) != 0) {
         return ESP_FAIL;
     }
     if (out_port) {
         *out_port = ntohs(bound.sin_port);
     }
 
-    if (!s_running) {
-        s_running = true;
-        xTaskCreatePinnedToCore(video_task, "xc_video", 8192, NULL, 5, NULL, 0);
+    s_running = true;
+    if (ch->task == NULL) {
+        xTaskCreatePinnedToCore(video_task, ch->display ? "xc_vid_cluster" : "xc_vid_main", 8192,
+                                ch, 5, &ch->task, 0);
     }
-    ESP_LOGI(TAG, "video listener on port %u", out_port ? *out_port : 0);
+    ESP_LOGI(TAG, "ch%u listener on port %u (%s)", (unsigned)type, out_port ? *out_port : 0,
+             ch->display ? "decode+display" : "drain");
     return ESP_OK;
 }
 
 void xc_video_stop(void)
 {
     s_running = false;
-    if (s_conn_fd >= 0) {
-        close(s_conn_fd);
-        s_conn_fd = -1;
-    }
-    if (s_listen_fd >= 0) {
-        close(s_listen_fd);
-        s_listen_fd = -1;
+    for (int i = 0; i < 2; i++) {
+        if (s_ch[i].conn_fd >= 0) {
+            close(s_ch[i].conn_fd);
+            s_ch[i].conn_fd = -1;
+        }
+        if (s_ch[i].listen_fd > 0) {
+            close(s_ch[i].listen_fd);
+            s_ch[i].listen_fd = -1;
+        }
     }
 }
 
 uint32_t xc_video_frame_count(void)
 {
-    return s_frames;
+    return s_ch[1].frames; /* the displayed channel */
 }
 
 bool xc_video_has_config(void)
 {
-    return s_has_config;
+    return s_ch[1].has_config;
 }
 
 /* ---- encode / decode / display self test ------------------------------ */
@@ -501,16 +612,19 @@ void xc_video_lcd_selftest(void)
     if (e == ESP_H264_ERR_OK && out.length > 0) {
         ESP_LOGI(TAG, "selftest: encoded %u bytes (type %d), decoding", (unsigned)out.length,
                  out.frame_type);
-        if (s_dec == NULL) {
-            esp_h264_dec_cfg_sw_t dcfg = { .pic_type = ESP_H264_RAW_FMT_I420 };
-            esp_h264_dec_sw_new(&dcfg, &s_dec);
-            esp_h264_dec_open(s_dec);
-        }
+        static video_chan_t tmp;
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.type = STREAM_TYPE_ALT_SCREEN;
+        tmp.display = true;
+        tmp.dec = wels_dec_create();
+        tmp.nal_length_size = 4;
         memcpy(s_annexb, enc_buf, out.length);
-        s_video_w = 0;
-        s_video_h = 0;
-        feed_decoder(s_annexb, out.length);
-        ESP_LOGI(TAG, "selftest: done, %u frame(s) decoded", (unsigned)s_frames);
+        feed_decoder(&tmp, s_annexb, out.length);
+        ESP_LOGI(TAG, "selftest: done, %u frame(s) decoded", (unsigned)tmp.frames);
+        if (tmp.dec != NULL) {
+            wels_dec_destroy(tmp.dec);
+            tmp.dec = NULL;
+        }
     } else {
         ESP_LOGE(TAG, "selftest: encode failed (%d)", e);
     }

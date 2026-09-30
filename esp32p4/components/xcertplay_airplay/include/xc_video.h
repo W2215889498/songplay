@@ -20,8 +20,13 @@
 extern "C" {
 #endif
 
-/** Start the video listener; *out_port receives the bound TCP port. */
-esp_err_t xc_video_start(const uint8_t key[32], uint16_t *out_port);
+/**
+ * Start the listener for one screen stream. \p type is the CarPlay stream type
+ * (110 main screen, 111 alt/cluster screen); the cluster channel decodes and
+ * renders to the panel, the main channel is drained. *out_port receives the
+ * bound TCP port.
+ */
+esp_err_t xc_video_start(uint16_t type, const uint8_t key[32], uint16_t *out_port);
 
 /** Stop the listener and drop the current connection. */
 void xc_video_stop(void);

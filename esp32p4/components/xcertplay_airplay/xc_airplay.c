@@ -26,6 +26,7 @@ static const char *TAG = "xc_airplay";
 
 #define XC_AIRPLAY_PORT 7000
 #define MAIN_UUID "b7e6c5a0-1111-4000-8000-000000000001"
+#define ALT_UUID "b7e6c5a0-2222-4000-8000-000000000002"
 #define SRCVERS "950.7.1"
 #define CARPLAY_FEATURES 0x615653aee2ULL
 
@@ -163,7 +164,27 @@ esp_err_t xc_airplay_build_info(uint8_t *buf, size_t cap, size_t *out_len)
     n = push(b, dk, dv, n, "viewAreas", view_areas);
     n = push(b, dk, dv, n, "initialViewArea", xc_bplist_int(b, 0));
     int display = xc_bplist_dict(b, dk, dv, n);
-    int displays = xc_bplist_array(b, &display, 1);
+
+    /* Second display entry: the instrument cluster / alt screen (type 111,
+     * ALT_UUID). The phone then sets up the type-111 screen stream, which is
+     * the one this product renders. */
+    int dk2[12], dv2[12];
+    n = 0;
+    n = push(b, dk2, dv2, n, "uuid", xc_bplist_str(b, ALT_UUID));
+    n = push(b, dk2, dv2, n, "type", xc_bplist_int(b, 111));
+    n = push(b, dk2, dv2, n, "maxFPS", xc_bplist_int(b, 60));
+    n = push(b, dk2, dv2, n, "widthPixels", xc_bplist_int(b, 480));
+    n = push(b, dk2, dv2, n, "heightPixels", xc_bplist_int(b, 800));
+    n = push(b, dk2, dv2, n, "widthPhysical", xc_bplist_int(b, 93));
+    n = push(b, dk2, dv2, n, "heightPhysical", xc_bplist_int(b, 155));
+    n = push(b, dk2, dv2, n, "features", xc_bplist_int(b, 0x0a));
+    n = push(b, dk2, dv2, n, "primaryInputDevice", xc_bplist_int(b, 1));
+    n = push(b, dk2, dv2, n, "viewAreas", view_areas);
+    n = push(b, dk2, dv2, n, "initialViewArea", xc_bplist_int(b, 0));
+    int display_alt = xc_bplist_dict(b, dk2, dv2, n);
+
+    int disp_arr[2] = { display, display_alt };
+    int displays = xc_bplist_array(b, disp_arr, 2);
 
     int r1k[6], r1v[6];
     r1k[0] = xc_bplist_str(b, "resourceID");       r1v[0] = xc_bplist_int(b, 1);
@@ -1055,6 +1076,15 @@ static uint16_t s_ntp_port;
 static uint16_t s_keepalive_port;
 static uint16_t s_event_port;
 
+/* Event channel (phone -> us for HID acks, us -> phone for /command). Unlike
+ * the control channel the keys are NOT swapped: we write with Events-Write and
+ * read with Events-Read (LIVI cpStack._openEventChannel). */
+static int s_event_conn = -1;
+static uint8_t s_ev_wkey[32];
+static volatile bool s_ev_ready;
+static uint64_t s_ev_wr;
+static uint16_t s_ev_cseq;
+
 static uint16_t aux_open_udp(int *out_fd)
 {
     int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -1166,12 +1196,127 @@ static void event_task(void *arg)
             continue;
         }
         ESP_LOGI(TAG, "event channel connected");
+        uint8_t key[32];
+        if (xc_hkdf_sha512((const uint8_t *)"Events-Salt", strlen("Events-Salt"), s_shared,
+                           sizeof(s_shared), (const uint8_t *)"Events-Write-Encryption-Key",
+                           strlen("Events-Write-Encryption-Key"), key, sizeof(key)) == ESP_OK) {
+            memcpy(s_ev_wkey, key, sizeof(key));
+            s_ev_wr = 0;
+            s_ev_cseq = 0;
+            s_event_conn = fd;
+            s_ev_ready = true;
+        } else {
+            ESP_LOGE(TAG, "event key derivation failed");
+        }
         uint8_t buf[512];
         while (recv(fd, buf, sizeof(buf), 0) > 0) {
         }
+        s_ev_ready = false;
+        s_event_conn = -1;
         close(fd);
         ESP_LOGW(TAG, "event channel closed");
     }
+}
+
+/* One event-channel frame: [len u16 LE][ciphertext][tag16], AAD = the length
+ * header, nonce = 4 zero bytes + 8-byte LE counter (same as the control
+ * channel, but with the Events-Write key and its own counter). */
+static void event_send_bytes(const uint8_t *data, size_t len)
+{
+    if (!s_ev_ready || s_event_conn < 0) {
+        return;
+    }
+    /* Dedicated TX buffer: the control channel's s_tx may be in use by the
+     * RTSP task while the video task sends these commands. */
+    EXT_RAM_BSS_ATTR static uint8_t ev_tx[XC_CTRL_MAX + 16];
+    size_t off = 0;
+    while (off < len) {
+        size_t chunk = (len - off) > XC_CTRL_MAX ? XC_CTRL_MAX : (len - off);
+        uint8_t hdr[2] = { (uint8_t)(chunk & 0xff), (uint8_t)(chunk >> 8) };
+        uint8_t nonce[12];
+        ctrl_nonce(s_ev_wr, nonce);
+        if (xc_chacha20poly1305_seal(s_ev_wkey, nonce, hdr, 2, data + off, chunk, ev_tx,
+                                     ev_tx + chunk) != ESP_OK) {
+            return;
+        }
+        send_all(s_event_conn, hdr, sizeof(hdr));
+        send_all(s_event_conn, ev_tx, chunk + 16);
+        s_ev_wr++;
+        off += chunk;
+    }
+}
+
+/* POST /command with an accessory dictionary body (LIVI _sendEventCommand). */
+static void event_send_command(const uint8_t *body, size_t body_len)
+{
+    if (!s_ev_ready || body == NULL || body_len == 0) {
+        return;
+    }
+    char head[192];
+    s_ev_cseq++;
+    int hn = snprintf(head, sizeof(head),
+                      "POST /command RTSP/1.0\r\n"
+                      "Content-Type: application/x-apple-binary-plist\r\n"
+                      "Content-Length: %u\r\n"
+                      "CSeq: %u\r\n\r\n",
+                      (unsigned)body_len, (unsigned)s_ev_cseq);
+    static uint8_t cmd[512];
+    if ((size_t)hn + body_len > sizeof(cmd)) {
+        return;
+    }
+    memcpy(cmd, head, (size_t)hn);
+    memcpy(cmd + hn, body, body_len);
+    event_send_bytes(cmd, (size_t)hn + body_len);
+    ESP_LOGI(TAG, "event command sent (%u bytes)", (unsigned)body_len);
+}
+
+esp_err_t xc_airplay_cluster_map_enable(void)
+{
+    if (!s_ev_ready || s_event_conn < 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    EXT_RAM_BSS_ATTR static uint8_t body[256];
+    size_t out_len = 0;
+
+    /* showUI: open the cluster map URL on the alt display. */
+    xc_bplist_t *b = xc_bplist_new();
+    if (b == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    int pk[2] = { xc_bplist_str(b, "uuid"), xc_bplist_str(b, "url") };
+    int pv[2] = { xc_bplist_str(b, ALT_UUID),
+                  xc_bplist_str(b, "maps:/car/instrumentcluster/map") };
+    int params = xc_bplist_dict(b, pk, pv, 2);
+    int ck[2] = { xc_bplist_str(b, "type"), xc_bplist_str(b, "params") };
+    int cv[2] = { xc_bplist_str(b, "showUI"), params };
+    int top = xc_bplist_dict(b, ck, cv, 2);
+    esp_err_t err = xc_bplist_serialize(b, top, body, sizeof(body), &out_len);
+    xc_bplist_free(b);
+    if (err != ESP_OK) {
+        return err;
+    }
+    event_send_command(body, out_len);
+    ESP_LOGI(TAG, "cluster: showUI %s sent", "maps:/car/instrumentcluster/map");
+
+    /* forceKeyFrame so the map appears immediately. */
+    b = xc_bplist_new();
+    if (b == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    int fpk[1] = { xc_bplist_str(b, "uuid") };
+    int fpv[1] = { xc_bplist_str(b, ALT_UUID) };
+    int fparams = xc_bplist_dict(b, fpk, fpv, 1);
+    int fck[2] = { xc_bplist_str(b, "type"), xc_bplist_str(b, "params") };
+    int fcv[2] = { xc_bplist_str(b, "forceKeyFrame"), fparams };
+    top = xc_bplist_dict(b, fck, fcv, 2);
+    err = xc_bplist_serialize(b, top, body, sizeof(body), &out_len);
+    xc_bplist_free(b);
+    if (err != ESP_OK) {
+        return err;
+    }
+    event_send_command(body, out_len);
+    ESP_LOGI(TAG, "cluster: forceKeyFrame sent");
+    return ESP_OK;
 }
 
 static void aux_start(void)
@@ -1287,9 +1432,10 @@ static void handle_stream(int fd, const rtsp_req_t *req)
         }
         int f1 = xc_bplist_str(rb, "iAPChannel");
         int f2 = xc_bplist_str(rb, "viewAreas");
-        int feats[2] = { f1, f2 };
+        int f3 = xc_bplist_str(rb, "altScreen");
+        int feats[3] = { f1, f2, f3 };
         dk[m] = xc_bplist_str(rb, "enabledFeatures");
-        dv[m++] = xc_bplist_array(rb, feats, 2);
+        dv[m++] = xc_bplist_array(rb, feats, 3);
         int top = xc_bplist_dict(rb, dk, dv, m);
 
         static uint8_t reply[512];
@@ -1311,7 +1457,7 @@ static void handle_stream(int fd, const rtsp_req_t *req)
                                 "Content-Length: %u\r\n\r\n",
                                 (unsigned)reply_len);
         send_response(fd, hdr, (size_t)hn, reply, reply_len);
-        ESP_LOGI(TAG, "SETUP reply: timing=%u event=%u keepalive=%u features=iAPChannel,viewAreas",
+        ESP_LOGI(TAG, "SETUP reply: timing=%u event=%u keepalive=%u features=iAPChannel,viewAreas,altScreen",
                  s_ntp_port, s_event_port, s_keepalive_port);
         return;
     }
@@ -1340,7 +1486,7 @@ static void handle_stream(int fd, const rtsp_req_t *req)
                                strlen("DataStream-Output-Encryption-Key"), key, sizeof(key)) ==
                 ESP_OK) {
                 uint16_t port = 0;
-                if (xc_video_start(key, &port) == ESP_OK) {
+                if (xc_video_start((uint16_t)type, key, &port) == ESP_OK) {
                     int dk[2] = { xc_bplist_str(b, "type"), xc_bplist_str(b, "dataPort") };
                     int dv[2] = { xc_bplist_int(b, (uint64_t)type), xc_bplist_int(b, port) };
                     vals[nv++] = xc_bplist_dict(b, dk, dv, 2);

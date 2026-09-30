@@ -140,56 +140,77 @@ PC-side full test (PC must be on `xcertplay-CarPlay`):
 ### Video decode / display
 - tinyh264 (SW decode) is **Baseline only**; the P4 HW encoder emits Baseline and accepts
   `ESP_H264_RAW_FMT_O_UYY_E_VYY` (not YUYV/I420), buffers must be 128-byte aligned.
+- **The real iPhone sends H.264 High profile (idc=100), level 3.1, CABAC, 480x800** (parsed from
+  the captured avcC/SPS). ESP32-P4 has **no H.264 hardware decoder** (only HW encoder;
+  `soc_caps.h` has `SOC_H264_ENCODER_SUPPORTED` only, no decoder) and the bundled esp_h264 SW
+  decoder (tinyh264) rejects profile 100 and cannot do CABAC. Decoding the phone's stream on the
+  P4 requires a different SW decoder (openh264 port) or a different SoC - see section 6.
+- The iPhone's video config frame is a **raw avcC record** (first payload byte 0x01), NOT
+  `\0\0\0\0avcC` like `tools/airplay_pair_test.py` sends; both shapes are accepted now.
 - Internal RAM is tight: `CONFIG_ESP_H264_DECODER_IRAM=n`, `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y`
   and `EXT_RAM_BSS_ATTR` on all protocol buffers (ESP-Hosted SDIO mempool fails otherwise).
 
-## 6. Current blocker / next steps (updated 2026-09-30)
+## 6. Current blocker / next steps (updated 2026-09-30, evening)
 
-**Root cause found and fixed.** The phone's silence was not a missing RTSP channel: neither
-xcertplay nor LIVI sends anything after the device-info SETUP reply, and the phone opens the
-event channel itself before the stream SETUP. The real problem was that **every plist we emitted
-was malformed at byte level**.
+**The AirPlay bring-up is SOLVED.** The phone now completes the whole wireless CarPlay
+handshake against this firmware:
 
-`xc_bplist.c`'s `obj_size()` over-estimated string/array/dict objects whose count is >= 15 by one
-byte (`marker_size()` returned `1 + int_obj_size()` while `obj_size()` also added its own marker
-byte). The SETUP reply contains the 15-char key `enabledFeatures` and the /info root dict has 17
-entries, so the offset table (and the table offset in the trailer for longer payloads) was shifted
-by one: `plistlib` (and CoreFoundation) could not parse our /info or SETUP reply at all. The phone
-apparently tolerated the broken /info (in recent logs it does not even GET /info, likely relying
-on the mDNS TXT record) but stalled once the SETUP reply it must parse came back malformed. Fixed
-in `xc_bplist.c` (`marker_size` now returns the integer-object size only); verified against a live
-capture with `tools/setup_reply_compare.py` (byte-for-byte equal to a Python port of the C writer,
-parsed by plistlib, semantically equal to xcertplay's `BplistCodec.encode` output).
+```
+SETUP reply -> event channel connected -> GET /info -> RECORD -> POST /command x N
+-> SETUP (streams, type 110) -> video stream connected, encrypted H.264 frames flow
+```
 
-Also fixed in the same pass (deviations from both working references):
-- RTSP responses now echo `CSeq` (was missing on every response).
-- `keepAlivePort` is only sent when the phone's SETUP requests `keepAliveLowPower` (as in
-  xcertplay/LIVI), not unconditionally.
-- Unknown requests (`OPTIONS`, `POST /command`, `POST /feedback`) are acknowledged with a bare
-  200 instead of 404.
-- The NTP listener no longer replies to PT_RESPONSE (the phone answering our clock sync).
-- Unsupported stream SETUP entries are skipped instead of replied to with empty dicts.
+Root cause of the long-standing stall: **the binary-plist byte format**. Two bugs compounded:
+1. `obj_size()` over-estimated string/array/dict objects with count >= 15 by one byte
+   (`marker_size()` double-counted the marker byte); and
+2. our writer emitted a nonstandard layout: sorted dict keys, a 2-byte offset table even when
+   1 byte fits, and a **33-byte trailer** (an extra leading zero) - parsers read the last 32
+   bytes so it accidentally worked for `plistlib`, but iOS's parser rejected the message.
+   The phone matches the response `CSeq` and then silently closes the control connection.
 
-Verification done (2026-09-30, firmware from this tree):
-- `GET /info` -> 2029 B, `plistlib` parses: 17 keys, `features=0x615653aee2`, display
-  `features=0xa`, 4 HID devices.
-- SETUP device-info reply captured over the encrypted channel: parses to
-  `{timingPort, eventPort, enabledFeatures=[iAPChannel, viewAreas]}`, carries `CSeq: 7`, and the
-  Python model of the fixed writer reproduces the device bytes exactly.
-- Real-iPhone end-to-end retry pending: the board is flashed and waiting; watch for
-  "event channel connected" and `/stream SETUP: N stream(s)` (N > 0) after the phone reconnects.
+Fixed by rewriting `xc_bplist_serialize()` to match `xcertplay/BplistCodec` and LIVI exactly:
+insertion-order keys, minimal offset-table entry size (1/2/4), **exactly 32-byte trailer**.
+Verified on air: `event channel connected` 8-10 ms after the reply, phone's `GET /info` served
+(2126-byte encrypted frame, iOS accepted it), `RECORD`, `/command` acks, stream SETUP answered
+with `dataPort`, and the encrypted video frames arrive and decrypt cleanly.
+
+Also fixed in this push:
+- RTSP responses echo `CSeq`; `keepAlivePort` only when requested; unknown requests get 200;
+  NTP listener ignores PT_RESPONSE; unsupported stream SETUP entries skipped.
+- Each encrypted response is now ONE ChaCha frame (head+body together, like xcertplay/LIVI).
+- iAP2 location: `0xFFFA` (StartLocationInformation) now starts a 1 Hz `0xFFFB` NMEA feed
+  (`$GPGGA`+`$GPRMC` skeleton in `xc_iap2.c`); stopping on `0xFFFC`. Without it iOS aborts the
+  bring-up after a few seconds (LIVI comment) and re-asks CarPlay availability.
+- The selftest decoder is closed after the selftest, and video frames are only fed after a
+  decoder was created from the stream's own avcC - before this the selftest's 480x272 decoder
+  was fed 480x800 real frames and the P4 crashed (load access fault in the decoder).
+- The real iPhone video config is a `raw avcC` payload (first byte 0x01) - now parsed.
+
+**New blocker: the P4 cannot decode the iPhone's H.264 stream.**
+- The phone sends **High profile (profile_idc=100), level 3.1, CABAC, 480x800** (stream is
+  portrait 480x800; the /info display description may need a width/height check).
+- ESP32-P4: H.264 **encoder only** in hardware (`SOC_H264_ENCODER_SUPPORTED`, no decoder cap).
+- esp_h264 v1.4.1 SW decoder = tinyh264 = **constrained baseline only**, rejects profile 100;
+  the bundled `libopenh264.a` contains only encoder symbols (`WelsCreateSVCEncoder`, no
+  decoder). tinyh264 also cannot do CABAC, so patching the SPS/PPS is not viable.
+
+Options for the video path (project-level decision):
+1. Port the **openh264 decoder** (welsdec, C++), which supports High/CABAC in portable C.
+   Expected ~10-25 fps at 480x800 on the 400 MHz P4 cores - needs integration work and a
+   performance spike; smaller/landscape display requests reduce the load.
+2. Keep the P4 as the wireless/display board and add a companion SoC with a HW video decoder.
+3. Re-scope: use the P4 only for protocol bring-up experiments (current state is a complete,
+   reproducible wireless CarPlay session up to video decode).
 
 Next steps:
-1. Reconnect the iPhone (CarPlay): expect `event channel connected` right after the SETUP reply,
-   then the stream SETUP. The `/stream` handler answers screen type 110 with `dataPort` and the
-   verified video pipeline takes over.
-2. Once the phone's stream SETUP arrives, note that MainAudio (100)/AltAudio(101)/Buffered(102)
-   streams will be skipped (audio out of scope) — if iOS insists on an audio stream before
-   video, building a minimal audio accept path may be needed.
-3. Keep `tools/setup_reply_compare.py` for regression: it prints the exact reply bytes and diffs
-   them against the reference encoder.
-4. Event channel currently only accepts+drains; when touch input lands, derive the `Events-*` keys
-   from the pair-verify shared secret and decrypt/reply per xcertplay `acceptEvent`.
+1. Decide the decode path (openh264 port vs companion SoC vs re-scope).
+2. Fix the /info display geometry if the 480x800 portrait stream is not intended (check
+   widthPixels/heightPixels vs the 800x480 panel; rotate at render time if needed).
+3. `/feedback` currently gets a bare 200; LIVI answers with a plist carrying the stream clock
+   (`syncedNtp()`), which the phone uses to place media time - implement before audio/touch.
+4. Event channel is accepted+drained; HID/touch needs the `Events-*` keys from the pair-verify
+   shared secret (xcertplay `acceptEvent`) plus the events cipher counters.
+5. Keep `tools/setup_reply_compare.py` for regression of the plist format.
 
 Other pending items:
 - ESP-Hosted reports `Host [2.12.0] > Co-proc [0.0.0]` -> consider updating the C6 slave firmware
@@ -225,3 +246,113 @@ Fix the reply first.
 4. Keep logging aux-port connects (`event_task` already logs) to confirm the phone reaches them.
 
 Reference trace committed at `esp32p4/LIVI.log` (449 lines, one full session).
+
+## 8. Evening session 2026-09-30 — cluster support, openh264, current blockers
+
+### 8.1 Done tonight (all flashed and exercised on hardware)
+
+1. **AirPlay bring-up SOLVED** (details in section 6): the phone now completes
+   `SETUP reply -> event channel -> GET /info -> RECORD -> /command x N -> SETUP(streams)
+   -> encrypted video frames`. Root cause was the nonstandard bplist byte layout
+   (sorted keys, 2-byte offset table, 33-byte trailer). `xc_bplist.c` now emits exactly
+   what xcertplay `BplistCodec` / LIVI `bplist.ts` emit: insertion-order keys, minimal
+   offset-table width, exactly 32-byte trailer.
+2. **openh264 software decoder ported** — new component `components/openh264_dec/`:
+   - vendored openh264 v2.2.0 `welsdec` (api/common/decoder core+plus), C fallback paths only;
+   - PSRAM allocator patch in `memory_align.cpp` (>=4 KB via `heap_caps_malloc(SPIRAM)`);
+   - `WelsThreadLib.cpp` / `wels_decoder_thread.cpp` ported for `ESP_PLATFORM` (no sysctl,
+     no `pthread_attr_setscope/setschedpolicy`);
+   - definition/declaration `int` vs `int32_t` fixes in `decoder_core.cpp`;
+   - `wels_dec.cpp` wrapper with a small C API (`wels_dec_create/decode/...`).
+   - Result: the iPhone's **H.264 High profile (idc=100) + CABAC 480x800** stream decodes.
+     Timing per frame (measured): decode 27-53 ms, render (I420->RGB565 + LCD draw)
+     98-160 ms -> ~5-7 fps, render-bound.
+3. **Instrument cluster (alt screen, stream type 111) support**, following LIVI's
+   `docs/carplay-tutorial/10-L6b-仪表盘Cluster地图.md`:
+   - `/info` now advertises TWO displays: main (type 110, MAIN_UUID) + cluster
+     (type 111, ALT_UUID `b7e6c5a0-2222-4000-8000-000000000002`), same 480x800 geometry;
+   - session `SETUP` reply's `enabledFeatures` now `[iAPChannel, viewAreas, altScreen]`;
+   - `xc_video.c` rewritten as two channels: **ch111 decodes+renders to the panel,
+     ch110 is accepted and drained** (the phone streams both; the main stream must exist);
+   - event-channel **command sender** (`POST /command`, Events-Write key, own counters)
+     in `xc_airplay.c`; `xc_airplay_cluster_map_enable()` sends
+     `showUI {uuid: ALT_UUID, url: 'maps:/car/instrumentcluster/map'}` +
+     `forceKeyFrame {uuid: ALT_UUID}` once the main stream is connected and the cluster
+     codec config arrived (LIVI gates on `mainStreamReady` the same way).
+   - Without these two commands the cluster stays **black** (map rendering is not automatic).
+     NOTE: the earlier "ch111 decoded 480x800 frames" happened **before** the activation
+     commands existed, which is why the panel showed nothing.
+4. **MFi iAP2 hardening**: certificate send uses the boot cache; the certificate is
+   **re-read (prime) immediately before `xc_mfi_sign_challenge()`** in the iAP2 challenge
+   handler, mirroring the AirPlay `/auth-setup` path (this coprocessor authenticates only
+   right after a fresh certificate-window read).
+5. Diagnostics added (temporary, still in tree): `link tx` / `link tx ACK raw=...` logging
+   in `xc_bt_link.c`, NTP/ctrl-frame logs in `xc_airplay.c`, `xc_bridge` event relay in
+   `xc_bt_link.c`.
+
+### 8.2 Verified live (old iPhone 8, iOS 15.7)
+
+- Full CarPlay session to video: `/stream SETUP: 1 stream(s)` -> `ch111 video config:
+  h264 39 bytes (avcC 39)` -> `openh264 decoder ready` -> `ch111 decoded resolution 480x800`
+  -> frames with per-frame timings (see 8.1.2).
+- iAP2 chain: identification (with the 0x0016 parameter retry) -> MFi cert+signature ->
+  wifi config -> transport identifiers -> `CarPlayStartSession` -> phone joins AP ->
+  AirPlay session -> cluster stream 111 + main stream 110 connected.
+- The bridge -> P4 UART relay works both ways; P4 sends the iAP2 marker every second.
+
+### 8.3 Unfinished / current blockers (in priority order)
+
+1. **New iPhone stalls in iAP2 link negotiation (the current blocker).**
+   - The replacement phone answers the marker and sends its synchronize packet
+     (`ff 5a ... c0 75 63 00 ...`, PSN 0x75, ack 0x63 = our PSN 99) but **repeats the same
+     sync ~3x every 1 s and then goes silent** - it never proceeds to identification.
+   - Our side sends `phone sync` -> `iAP2 link writable` and a plain ACK
+     (`link tx ACK psn=99 ack=117 raw=...`; format identical to xcertplay `Iap2LinkEngine`
+     and LIVI `iap2-link` Rust: ctl 0x40, PSN = sentSequence, ACK = phone's PSN, session 0,
+     len 9). The phone apparently does not accept/receive it.
+   - Suspects: (a) the bridge is not forwarding our ACK reliably during its 2 s
+     "channel stability" window, (b) the new iOS validates something further
+     (retransmission during negotiation), (c) ACK timing. Next diagnostic: capture the
+     `link tx ACK raw=...` bytes and compare against the LIVI working trace of the same
+     phone; consider re-sending the ACK (e.g. twice, +200 ms) during negotiation.
+   - Note: the old iPhone DID accept the exact same code path earlier today, so this is
+     phone-iOS-version specific.
+2. **Cluster map activation not yet verified end-to-end** (needs a session that reaches
+   video again; the showUI/forceKeyFrame path was added after the last successful video).
+   Verify with Apple Maps navigation active (LIVI doc: only the navigation app renders the
+   cluster map; Apple Maps is known-good).
+3. **Old iPhone stops engaging CarPlay after repeated MFi rejections** - BT/HID stay
+   connected but the phone no longer answers the marker. Recovery that worked: reboot /
+   forget+re-pair the phone. With LIVI the user sees "配件不支持" and it recovers alone.
+4. **Bridge channel selection**: after an RFCOMM dirty close, `esp_spp_connect` reports
+   "already opened (MCB state 5)" for channel 1, the scanner falls through to channel 2 and
+   the phone drops it after ~3 s, cycling forever. Improvement: prefer the channel that
+   actually answers the iAP2 marker and close wrong ones immediately; reset the bridge
+   after dirty sessions. This caused a string of "phone does not answer" red herrings.
+5. **Performance**: render (I420->RGB565 + LCD draw) is the bottleneck (~100-160 ms/frame).
+   Next step: use the P4 2D-PPA (`esp_driver_ppa` exists in IDF v6.0.3) for the colour
+   conversion, or at least a faster scalar loop. Decode is acceptable (27-53 ms).
+6. **Protocol side still open**: `/feedback` should answer with a plist carrying the stream
+   clock (LIVI `_handle`: `{type, sampleRate}` per active audio stream / `syncedNtp()`);
+   event-channel HID/touch (Events-Read/Write keys; `xc_airplay.c` already derives the
+   write key); audio streams are skipped entirely (type 100/101/102 -> no dataPort).
+
+### 8.4 Repository / file record
+
+Key files touched in this push:
+- `components/xcertplay_airplay/xc_bplist.c` - canonical bplist writer (the unblocker);
+- `components/xcertplay_airplay/xc_airplay.c` - CSeq echo, conditional keepAlivePort,
+  single-frame encrypted responses, 200-ack for /command & /feedback, NTP filter,
+  2-display /info + `altScreen`, event-channel command sender + cluster activation;
+- `components/xcertplay_airplay/xc_video.c` - dual-channel rewrite (main drain / cluster
+  decode+display), openh264 integration, avcC raw-record parsing, zero-length keep-alive fix;
+- `components/openh264_dec/` - NEW vendored decoder component (see 8.1.2);
+- `components/xcertplay_bootstrap/xc_iap2.c` - location 0xFFFA/0xFFFB, MFi cert prime;
+- `components/xcertplay_bootstrap/xc_bt_link.c` - TX mutex, link tx diagnostics;
+- `tools/setup_reply_compare.py` - captures the device SETUP reply and byte-compares it
+  with the reference encoder (regression tool for the format bug);
+- `STATUS.md`, `LIVI.log` (the working LIVI session trace used as ground truth).
+
+Not in git (see `.gitignore`): `build/`, `managed_components/` (385 MB, re-fetched by
+`idf.py reconfigure`), `xcertplay/` and `reference/` (embedded reference clones with their
+own `.git`), `*.log` except `LIVI.log`.

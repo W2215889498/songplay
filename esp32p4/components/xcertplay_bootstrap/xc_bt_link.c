@@ -107,6 +107,13 @@ static void link_write_packet(uint8_t control, uint8_t session, uint8_t seq,
         n += len;
         out[n++] = csum(payload, len);
     }
+    if (control != CONTROL_ACKNOWLEDGEMENT || len > 0) {
+        ESP_LOGI(TAG, "link tx ctl=0x%02x psn=%u ack=%u sess=%u len=%u", control, seq, s_ack,
+                 session, (unsigned)n);
+    } else {
+        ESP_LOGI(TAG, "link tx ACK psn=%u ack=%u raw=%02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                 seq, s_ack, out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7], out[8]);
+    }
     /* Everything must travel inside the bridge's A5 framing. */
     bridge_send(FT_DATA, out, n);
 }

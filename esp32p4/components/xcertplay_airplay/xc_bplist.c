@@ -179,27 +179,6 @@ static size_t marker_size(size_t count)
     return count < 15 ? 0 : int_obj_size(count);
 }
 
-/* Sort a dict's key/value pairs by key string (CoreFoundation expects sorted keys). */
-static void sort_dict(xc_bplist_t *b, int id)
-{
-    pb_obj_t *d = &b->obj[id];
-    for (int i = 0; i < d->nrefs; i++) {
-        for (int j = i + 1; j < d->nrefs; j++) {
-            int ki = d->keyrefs[i];
-            int kj = d->keyrefs[j];
-            int c = strcmp(b->obj[ki].s, b->obj[kj].s);
-            if (c > 0) {
-                int t = d->keyrefs[i];
-                d->keyrefs[i] = d->keyrefs[j];
-                d->keyrefs[j] = t;
-                t = d->refs[i];
-                d->refs[i] = d->refs[j];
-                d->refs[j] = t;
-            }
-        }
-    }
-}
-
 static size_t obj_size(xc_bplist_t *b, int id, int refsize)
 {
     pb_obj_t *o = &b->obj[id];
@@ -261,12 +240,6 @@ esp_err_t xc_bplist_serialize(xc_bplist_t *b, int root, uint8_t *out, size_t cap
         return ESP_ERR_INVALID_ARG;
     }
 
-    for (int i = 0; i < b->n; i++) {
-        if (b->obj[i].type == PB_DICT) {
-            sort_dict(b, i);
-        }
-    }
-
     int refsize = (b->n <= 0xff) ? 1 : 2;
     size_t offset = 8; /* after "bplist00" */
     size_t offsets[XC_BPLIST_MAX_OBJ];
@@ -275,9 +248,9 @@ esp_err_t xc_bplist_serialize(xc_bplist_t *b, int root, uint8_t *out, size_t cap
         offset += obj_size(b, i, refsize);
     }
     size_t offset_table_offset = offset;
-    size_t largest = offset;
-    int offset_int_size = largest <= 0xffff ? 2 : 4;
-    size_t total = 8 + (offset - 8) + (size_t)b->n * offset_int_size + 32;
+    /* The reference encoders use the smallest offset-table entry that fits. */
+    int offset_int_size = offset_table_offset <= 0xff ? 1 : offset_table_offset <= 0xffff ? 2 : 4;
+    size_t total = offset_table_offset + (size_t)b->n * offset_int_size + 32;
     if (total > cap) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -324,14 +297,11 @@ esp_err_t xc_bplist_serialize(xc_bplist_t *b, int root, uint8_t *out, size_t cap
     }
 
     for (int i = 0; i < b->n; i++) {
-        if (offset_int_size == 2) {
-            put_be(&p, offsets[i], 2);
-        } else {
-            put_be(&p, offsets[i], 4);
-        }
+        put_be(&p, offsets[i], offset_int_size);
     }
 
-    for (int i = 0; i < 6; i++) {
+    /* Canonical 32-byte trailer: 5 unused bytes, sortVersion, then the sizes. */
+    for (int i = 0; i < 5; i++) {
         *p++ = 0;
     }
     *p++ = 0; /* sortVersion */

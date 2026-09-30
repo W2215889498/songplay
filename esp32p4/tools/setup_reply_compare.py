@@ -212,10 +212,6 @@ def xc_bplist_setup_reply(timing_port, event_port, keepalive_port=None):
     top = len(objects)
     objects.append(("dict", list(zip(keys, vals))))
 
-    order = sorted(range(len(keys)), key=lambda i: objects[keys[i]][1])
-    sorted_pairs = [(keys[i], vals[i]) for i in order]
-    objects[top] = ("dict", sorted_pairs)
-
     def obj_size(o):
         if o[0] == "str":
             n = len(o[1])
@@ -245,7 +241,7 @@ def xc_bplist_setup_reply(timing_port, event_port, keepalive_port=None):
         offsets.append(cursor)
         cursor += obj_size(o)
     table_offset = cursor
-    offset_int_size = 2 if cursor <= 0xFFFF else 4
+    offset_int_size = 1 if table_offset <= 0xFF else 2 if table_offset <= 0xFFFF else 4
     refsize = 1 if len(objects) <= 0xFF else 2
     out = bytearray(b"bplist00")
 
@@ -280,7 +276,7 @@ def xc_bplist_setup_reply(timing_port, event_port, keepalive_port=None):
                 out.extend(_be(v, refsize))
     for off in offsets:
         out.extend(_be(off, offset_int_size))
-    out.extend(b"\x00" * 6)       # 6 zeros (one of them is a never-read extra byte)
+    out.extend(b"\x00" * 5)        # unused
     out.append(0)                  # sortVersion
     out.append(offset_int_size)
     out.append(refsize)

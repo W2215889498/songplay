@@ -415,8 +415,15 @@ static void on_message(uint16_t msg_id, const uint8_t *body, size_t len)
         const uint8_t *cert = NULL;
         size_t cert_len = 0;
         if (!xc_mfi_cached_certificate(&cert, &cert_len)) {
-            ESP_LOGE(TAG, "no cached MFi certificate");
-            break;
+            /* No boot-time copy: try a fresh read as a last resort. */
+            EXT_RAM_BSS_ATTR static uint8_t cert_fresh[XC_MFI_MAX_CERTIFICATE];
+            if (xc_mfi_read_certificate(cert_fresh, sizeof(cert_fresh), &cert_len) == ESP_OK) {
+                cert = cert_fresh;
+                ESP_LOGW(TAG, "MFi: boot cache empty, using fresh certificate read");
+            } else {
+                ESP_LOGE(TAG, "no cached MFi certificate");
+                break;
+            }
         }
         tlv_t t = { .buf = s_body, .cap = sizeof(s_body), .ok = true };
         tlv_bytes(&t, 0, cert, cert_len);
@@ -431,6 +438,14 @@ static void on_message(uint16_t msg_id, const uint8_t *body, size_t len)
         if (!tlv_find(body, len, 0, &ch, &ch_len) || ch_len == 0) {
             ESP_LOGE(TAG, "challenge param missing");
             break;
+        }
+        /* This coprocessor authenticates only right after a fresh certificate
+         * window read (see the AirPlay /auth-setup path); re-read and discard
+         * before signing or iOS silently rejects the signature. */
+        EXT_RAM_BSS_ATTR static uint8_t cert_prime[XC_MFI_MAX_CERTIFICATE];
+        size_t prime_len = 0;
+        if (xc_mfi_read_certificate(cert_prime, sizeof(cert_prime), &prime_len) != ESP_OK) {
+            ESP_LOGW(TAG, "MFi: certificate prime read failed");
         }
         static uint8_t sig[256];
         size_t sig_len = 0;

@@ -21,6 +21,13 @@ esp_err_t xc_airplay_build_info(uint8_t *buf, size_t cap, size_t *out_len);
 /** AirPlay device id (AP MAC) as a "AA:BB:.." string, used by iAP2 too. */
 void xc_airplay_device_id(char *out, size_t cap);
 
+/**
+ * Ask the phone to render the CarPlay navigation map on the instrument-cluster
+ * (alt screen) display: sends the showUI and forceKeyFrame commands over the
+ * event channel (the alt screen stays black otherwise, see LIVI's cluster doc).
+ * Returns ESP_ERR_INVALID_STATE while the event channel is not up (retry). */
+esp_err_t xc_airplay_cluster_map_enable(void);
+
 #ifdef __cplusplus
 }
 #endif
