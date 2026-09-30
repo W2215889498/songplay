@@ -198,3 +198,30 @@ Other pending items:
   stops showing it, `Settings -> Bluetooth -> forget`, then re-pair.
 - The P4 softAP occasionally stops beaconing after many phone reconnect cycles (PC Wi-Fi can no
   longer see `xcertplay-CarPlay`); a board reset restores it. Keep in mind when debugging.
+
+## 7. Ground truth from LIVI.log (2026-09-30) — what the phone does next
+
+A real, successful wireless session (LIVI on a Pi). Log line numbers:
+
+- `L113` accessory starts NTP sync towards the phone's timing port (we already do this)
+- `L114` SETUP session reply (timingPort, eventPort, keepAlivePort)
+- `L116` **"event channel connected" — 21 ms after our reply the PHONE CONNECTS OUR eventPort**
+- `L117` `< GET /info (body 177B)` — phone asks /info; body = `{"altScreenURLs":[ ... ]}`
+- `L122` `< RECORD rtsp://.../<id> (body 0B)` — session start, answer `200 OK` empty
+- `L126` `< SETUP rtsp://.../<id> (body 252B)` — only now the stream SETUP (screen 110/111)
+- `L127` `SETUP screen NATIVE (cluster, dataPort=45403, id=...)` — dataPort comes from our reply
+- `L128+` `< POST /command` (many, incl. `disableBluetooth`) — acknowledge with an empty 200 plist
+
+**Diagnosis**: our firmware never sees the event-channel connection nor `/info`, so our device-info
+`SETUP` reply is being **silently rejected** by the phone. Everything after it never happens.
+Fix the reply first.
+
+**Next steps**
+1. Copy LIVI's SETUP-session reply construction exactly (`reference/LIVI/src/main/services/projection/driver/cp/stack/cpStack.ts`):
+   exact key set and order (`timingPort`, `eventPort`, `keepAlivePort`; check whether
+   `enabledFeatures` is included and with which values).
+2. Validate our encoding with `esp32p4/tools/setup_reply_compare.py` (+ `setup_reply_captured.bin`).
+3. Add a `RECORD` handler (reply `200 OK`, empty body) — currently 404.
+4. Keep logging aux-port connects (`event_task` already logs) to confirm the phone reaches them.
+
+Reference trace committed at `esp32p4/LIVI.log` (449 lines, one full session).

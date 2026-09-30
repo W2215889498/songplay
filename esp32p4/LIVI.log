@@ -1,0 +1,449 @@
+[09:12:19.748] [GstVideo] GStreamer 1.28.4 (bundled: /tmp/.mount_LIVI.AaLoHLf/resources/gstreamer/linux-arm64)
+[09:12:19.769] [CodecCapability] GStreamer codecs: h264(hw=false sw=true) h265(hw=true sw=true) vp9(hw=false sw=false) av1(hw=false sw=false)
+[09:12:19.769] [CodecCapability] hevc support: true
+[09:12:19.882] [ProjectionService] starting unified BT supervisor (aaWireless=true cpWireless=true)
+[09:12:19.951] [SystemVolume] watching the sink for changes made outside LIVI
+[09:12:20.113] [TelemetrySocket] Server listening on port 4000
+[09:12:20.117] [AaManager] wireless AA listening on TCP 5277
+[09:12:20.118] [CpManager] listening on :7000 (dual-stack)
+[09:12:20.191] [SystemVolume] system volume → 100 %
+[09:12:20.243] [USBService] startup scan: 1 USB devices on bus: vid=0x2717 pid=0x5023 cls=0x0
+[09:12:20.300] [helper] [config] loaded from /home/carpi/.config/LIVI/config.json
+[09:12:20.481] [helper] [mfi] power on  gpio=21 soc=BCM2712
+[09:12:20.584] [helper] [mfi] i2c_addr=0x10 device_version=7 protocol_major=3 i2c_bus=2 power_gpio=21 soc=BCM2712
+[09:12:20.593] [helper] [livi-helper] [cp] carkit (wired CarPlay) watcher started
+[09:12:20.593] [helper] [livi-helper] CarPlay (iAP2) handler registered (wired CarPlay live)
+[09:12:20.594] [helper] [livi-helper] wireless: bringing up (aa=True cp=True)
+[09:12:20.595] [helper] [livi-helper] [cp] [cp-sock] listening on /tmp/cp-bt.sock
+[09:12:20.598] [helper] [livi-helper] bringing up Wi-Fi AP (iface=wlan0)
+[09:12:21.451] [helper] [livi-helper] [cp] [carkit] wired watcher running (config-6 usbmux)
+[09:12:21.451] [helper] [livi-helper] [cp] [carkit] wired iPhones: 0 active=0
+[09:12:21.452] [helper] [livi-helper] [cp] [cp-sock] event subscriber connected
+[09:12:21.452] [helper] [livi-helper] [cp] reconnect-targets: {'14:D0:0D:2A:29:5C': '00000000-deca-fade-deca-deafdecacafe'}
+[09:12:23.282] [helper] [wifi_ap] wlan0 link-local fe80::2ecf:67ff:fe3c:67f2
+[09:12:23.750] [helper] [wifi_ap] AP up — SSID='Carpi'  IP=10.10.0.1  channel=36  link-local=fe80::2ecf:67ff:fe3c:67f2
+[09:12:23.750] [helper] [livi-helper] Wi-Fi AP ready
+[09:12:23.778] [helper] [livi-helper] Android Auto (AAP) handler registered
+[09:12:23.779] [helper] [livi-helper] BT advertising enabled (discoverable + pairable)
+[09:12:23.782] [helper] [livi-helper] [cp] iAP2 Bluetooth profiles registered
+[09:12:23.783] [helper] [livi-helper] [cp] CarPlay service UUID published in the Bluetooth EIR
+[09:12:24.185] [helper] [livi-helper] [cp] reconnect-targets: {'14:D0:0D:2A:29:5C': '00000000-deca-fade-deca-deafdecacafe'}
+[09:12:24.591] [helper] [livi-helper] [cp] [wifi] hostapd events attached
+[09:12:25.803] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[09:12:26.677] [ProjectionService] wireless AA bring-up (listener already armed)
+[09:12:26.765] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 1/5 failed: Call failed: br-connection-refused
+[09:12:31.877] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[09:12:32.569] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 2/5 failed: Call failed: br-connection-refused
+[09:12:37.951] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[09:12:40.925] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 3/5 failed: Call failed: br-connection-refused
+[14:52:06.819] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:52:07.110] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 4/5 failed: Call failed: br-connection-refused
+[14:52:10.869] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:52:11.746] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C connect nudge failed: Call failed: br-connection-refused (retry in 4s)
+[14:52:16.943] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:52:17.438] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 1/5 failed: Call failed: br-connection-refused
+[14:52:20.077] [kiosk] enter: screen=1920x1080 workArea=1920x1080 window=1920x1080
+[14:52:20.996] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:52:23.582] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 2/5 failed: Call failed: br-connection-refused
+[14:52:29.108] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:52:29.526] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 3/5 failed: Call failed: br-connection-refused
+[14:52:34.044] [helper] new bluetooth connection /org/bluez/hci0/dev_14_D0_0D_2A_29_5C /org/bluez/iap_server
+[14:52:34.044] [helper] [livi-helper] [cp] phone connected over RFCOMM mac=14:D0:0D:2A:29:5C
+[14:52:36.541] [helper] [livi-helper] [cp] session ended: Exception('timeout during register select 0x30')
+[14:52:42.365] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C connected but no session -> Disconnect (clear stale)
+[14:52:47.218] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:52:48.305] [helper] new bluetooth connection /org/bluez/hci0/dev_14_D0_0D_2A_29_5C /org/bluez/iap_client
+[14:52:48.305] [helper] [livi-helper] [cp] phone connected over RFCOMM mac=14:D0:0D:2A:29:5C
+[14:52:48.308] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C connected
+[14:52:50.327] [helper] [livi-helper] [cp] identification: sending accessory info
+[14:52:50.464] [helper] [livi-helper] [cp] identification: accepted
+[14:52:50.465] [helper] [livi-helper] [cp] auth: sending MFi certificate
+[14:52:50.595] [helper] [livi-helper] [cp] auth: unexpected message AuthenticationFailed
+[14:52:50.595] [helper] [livi-helper] [cp] session ended: Exception('auth failed')
+[14:53:00.684] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C connected but no session -> Disconnect (clear stale)
+[14:53:00.689] [helper] Disconnect
+[14:53:05.277] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:53:06.298] [helper] new bluetooth connection /org/bluez/hci0/dev_14_D0_0D_2A_29_5C /org/bluez/iap_client
+[14:53:06.298] [helper] [livi-helper] [cp] phone connected over RFCOMM mac=14:D0:0D:2A:29:5C
+[14:53:06.300] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C connected
+[14:53:06.793] [helper] [livi-helper] [cp] identification: sending accessory info
+[14:53:06.931] [helper] [livi-helper] [cp] identification: accepted
+[14:53:06.932] [helper] [livi-helper] [cp] auth: sending MFi certificate
+[14:53:07.066] [helper] [livi-helper] [cp] auth: signing challenge
+[14:53:07.606] [helper] [livi-helper] [cp] auth: succeeded
+[14:53:07.606] [helper] [livi-helper] [cp] nowplaying: subscribed (bt)
+[14:53:07.606] [helper] [livi-helper] [cp] navigation: subscribed (bt)
+[14:53:07.606] [helper] [livi-helper] [cp] power: subscribed (bt)
+[14:53:07.606] [helper] [livi-helper] [cp] cellular: subscribed (bt)
+[14:53:07.606] [helper] [livi-helper] [cp] call state: subscribed (bt)
+[14:53:07.607] [helper] [livi-helper] [cp] phone requested Wi-Fi config, replying with AP credentials
+[14:53:07.607] [helper] [cp] re-browsing _carplay-ctrl (15 rounds, ~22s)
+[14:53:07.673] [helper] [livi-helper] [cp] vehicle status: subscribed (bt)
+[14:53:07.674] [helper] [livi-helper] [cp] wireless CarPlay status: 1
+[14:53:07.703] [helper] [livi-helper] [cp] device time: offset -0.7s, keeping the system clock
+[14:53:07.712] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=128)
+[14:53:07.713] [helper] [livi-helper] [cp] power level=38 cid= phoneId=
+[14:53:07.714] [helper] [livi-helper] [cp] power charging=False cid= phoneId=
+[14:53:07.723] [helper] [livi-helper] [cp] cellular signal=1 carrier=无SIM卡 cellularSupported=True cid= phoneId=
+[14:53:07.729] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=129)
+[14:53:08.746] [helper] [livi-helper] [cp] CarPlayStartSession sent (wireless): iface=wlan0 ssid=Carpi channel=36 fe80=fe80::2ecf:67ff:fe3c:67f2 port=7000
+[14:53:08.746] [helper] [livi-helper] [cp] device transport identifier: bt='14:d0:0d:2a:29:5c' usb='f5a196b7bae1cdc7fa59dda3c305ea7010a0739f'
+[14:53:08.822] [helper] [livi-helper] [cp] CarPlayStartSession sent (wireless): iface=wlan0 ssid=Carpi channel=36 fe80=fe80::2ecf:67ff:fe3c:67f2 port=7000
+[14:53:13.734] [CpManager] control connection from fe80::476:abe0:ccfe:1e08%wlan0:49165
+[14:53:13.735] [panel] EDID of card1-HDMI-A-2: 527x296 mm, 1920x1080 px
+[14:53:13.736] [hwaddr] WiFi BSSID detected: 2C:CF:67:3C:67:F2 (wlan0)
+[14:53:13.746] [hwaddr] BT MAC detected from busctl: 2C:CF:67:3C:67:F4 (hci0)
+[14:53:13.747] [cpStack] control connection from fe80::476:abe0:ccfe:1e08%wlan0:49165
+[14:53:13.751] [cpStack] < POST /pair-verify (body 37B)
+[14:53:13.761] [pairVerify] M1->M2
+[14:53:13.782] [cpStack] < POST /pair-verify (body 125B)
+[14:53:13.784] [pairVerify] M3->M4 verified (controller 00000000-0000-0000-0000-14d00d1f8e35)
+[14:53:13.784] [cpStack] control channel encrypted
+[14:53:13.788] [cpStack] < POST /auth-setup (body 33B)
+[14:53:14.360] [authSetup] signed (cert 609B, sig 64B, sha256)
+[14:53:14.392] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 484B)
+[14:53:14.394] ══════ SESSIONS · create #1 carplay in={"btMac":"14:D0:0D:2A:29:5C","wifiMac":"14:d0:0d:1d:38:11","usbUdid":""} ══════
+  #1  carplay    wifi held   main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c wifi=14:d0:0d:1d:38:11
+[14:53:14.395] [ProjectionService] active session -> #1 carplay
+[14:53:14.396] [SESSIONS] codec-restore #1 carplay: session=- map=- → gstVideoCodec=h264
+[14:53:14.397] ══════ SESSIONS · activate #1 carplay (prev none) ══════
+  #1  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c wifi=14:d0:0d:1d:38:11
+[14:53:14.397] ══════ SESSIONS · upsert #1 carplay in={"btMac":"14:D0:0D:2A:29:5C","wifiMac":"14:d0:0d:1d:38:11"} ══════
+  #1  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c wifi=14:d0:0d:1d:38:11
+[14:53:14.399] [cpTiming] driving clock sync to fe80::476:abe0:ccfe:1e08%wlan0:62114
+[14:53:14.400] [cpStack] SETUP session (timingPort=41121, eventPort=42751, keepAlivePort=51037)
+[14:53:14.402] [helper] [livi-helper] [cp] reconnect-targets: {}
+[14:53:14.408] [cpStack] event channel connected
+[14:53:14.416] [cpStack] < GET /info (body 177B)
+[14:53:14.416] [hwaddr] WiFi BSSID detected: 2C:CF:67:3C:67:F2 (wlan0)
+[14:53:14.429] [hwaddr] BT MAC detected from busctl: 2C:CF:67:3C:67:F4 (hci0)
+[14:53:14.429] [cpStack] /info request from phone: {"altScreenURLs":["maps:/car/instrumentcluster/map","maps:/car/instrumentcluster/instructioncard","maps:/car/instrumentcluster"]}
+[14:53:14.430] [cpStack] /info audio: disableAudioOutput=false audioFormats=9 audioLatencies=9
+[14:53:14.447] [cpStack] < RECORD rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 0B)
+[14:53:14.448] [cpStack] RECORD (session started)
+[14:53:14.449] [helper] [livi-helper] [cp] [cp-sock] tunnel connection — running iAP2 over CarPlay (cid=00000000-0000-0000-0000-14d00d1f8e35)
+[14:53:14.449] [helper] [livi-helper] [cp] phone connected over Wi-Fi (CarPlay tunnel)
+[14:53:14.517] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 252B)
+[14:53:14.537] [cpStack] SETUP screen NATIVE (cluster, dataPort=45403, id=6582115752247772958)
+[14:53:14.564] [cpStack] < POST /command (body 232B)
+[14:53:14.573] [cpStack] < POST /command (body 115B)
+[14:53:14.573] [cpStack] disableBluetooth (deviceID=14:d0:0d:2a:29:5c) — disconnecting BT
+[14:53:14.581] [helper] [livi-helper] [cp] iAP2 link started (negotiate initiated, wifi)
+[14:53:14.583] [helper] Disconnect
+[14:53:14.634] [cpStack] < POST /command (body 94B)
+[14:53:14.646] [cpStack] < POST /command (body 119B)
+[14:53:14.651] [cpStack] < POST /command (body 106B)
+[14:53:14.651] [helper] [livi-helper] [cp] identification: sending accessory info
+[14:53:14.658] [cpStack] < POST /command (body 110B)
+[14:53:14.658] [helper] [livi-helper] [cp] identification REJECTED, flagged fields: ['location_information_component']
+[14:53:14.659] [helper] [livi-helper] [cp] identification: retrying without ['location_information_component']
+[14:53:14.666] [cpStack] < POST /command (body 106B)
+[14:53:14.667] [helper] [livi-helper] [cp] identification: accepted
+[14:53:14.670] [cpStack] < POST /command (body 106B)
+[14:53:14.670] [helper] [livi-helper] [cp] auth: sending MFi certificate
+[14:53:14.677] [cpStack] < POST /command (body 142B)
+[14:53:14.678] [helper] [livi-helper] [cp] auth: signing challenge
+[14:53:15.163] [cpStack] < POST /command (body 106B)
+[14:53:15.163] [helper] [livi-helper] [cp] auth: succeeded
+[14:53:15.163] [helper] [livi-helper] [cp] nowplaying: subscribed (wifi)
+[14:53:15.163] [helper] [livi-helper] [cp] navigation: subscribed (wifi)
+[14:53:15.163] [helper] [livi-helper] [cp] power: subscribed (wifi)
+[14:53:15.164] [helper] [livi-helper] [cp] cellular: subscribed (wifi)
+[14:53:15.164] [helper] [livi-helper] [cp] call state: subscribed (wifi)
+[14:53:15.167] [cpStack] < POST /command (body 106B)
+[14:53:15.168] [helper] [livi-helper] [cp] phone requested Wi-Fi config, replying with AP credentials
+[14:53:15.168] [helper] [cp] re-browse already running, skipping duplicate
+[14:53:15.174] [cpStack] < POST /command (body 114B)
+[14:53:15.174] [helper] [livi-helper] [cp] vehicle status: subscribed (wifi)
+[14:53:15.176] [cpStack] < POST /command (body 129B)
+[14:53:15.176] [helper] [livi-helper] [cp] device time: offset -0.2s, keeping the system clock
+[14:53:15.240] [cpStack] < POST /command (body 111B)
+[14:53:15.240] [helper] [livi-helper] [cp] wireless CarPlay status: 1
+[14:53:15.242] [cpStack] < POST /command (body 173B)
+[14:53:15.243] [helper] [livi-helper] [cp] device transport identifier: bt='14:d0:0d:2a:29:5c' usb='f5a196b7bae1cdc7fa59dda3c305ea7010a0739f'
+[14:53:15.245] [cpStack] < POST /command (body 160B)
+[14:53:15.245] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=128)
+[14:53:15.247] [helper] [livi-helper] [cp] cellular signal=1 carrier=无SIM卡 cellularSupported=True cid= phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:53:15.250] [cpStack] < POST /command (body 112B)
+[14:53:15.252] [cpStack] < POST /command (body 111B)
+[14:53:15.253] [helper] [livi-helper] [cp] power charging=False cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:53:15.254] [cpStack] < POST /command (body 111B)
+[14:53:15.257] [cpStack] < POST /command (body 112B)
+[14:53:15.258] [helper] [livi-helper] [cp] power level=38 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:53:15.260] [cpStack] < POST /command (body 128B)
+[14:53:15.263] [cpStack] < POST /command (body 130B)
+[14:53:15.264] [helper] [livi-helper] [cp] cellular signal=1 carrier=无SIM卡 cellularSupported=True cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:53:15.265] [cpStack] < POST /command (body 133B)
+[14:53:15.270] [cpStack] < POST /command (body 111B)
+[14:53:15.272] [cpStack] < POST /command (body 115B)
+[14:53:15.273] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=129)
+[14:53:15.276] [cpStack] < POST /command (body 112B)
+[14:53:15.278] [cpStack] < POST /command (body 100B)
+[14:53:15.281] [cpStack] < POST /command (body 100B)
+[14:53:15.316] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=130)
+[14:53:15.405] [cpTiming] clock synced: offset=-1790747263.121s rtt=3.3ms
+[14:53:16.074] [helper] [livi-helper] [cp] wifi joined mac=14:d0:0d:1d:38:11 ip=10.10.0.25
+[14:53:16.074] [helper] [livi-helper] [cp] wifi joined ip=10.10.0.25 -> re-browsing for _carplay-ctrl
+[14:53:16.074] [helper] [cp] re-browse already running, skipping duplicate
+[14:53:16.921] [helper] [livi-helper] [cp] session ended: IncompleteReadError('0 bytes read on a total of 6 expected bytes')
+[14:53:16.923] [CpSession] BT disconnected for 14:d0:0d:2a:29:5c — iAP2 moves to tunnel
+[14:53:17.091] [cpStack] < POST /command (body 232B)
+[14:53:17.102] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 252B)
+[14:53:17.102] ══════ SESSIONS · upsert #1 carplay in={"controllerId":"00000000-0000-0000-0000-14d00d1f8e35"} ══════
+  #1  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c wifi=14:d0:0d:1d:38:11 ctrl=00000000-0000-0000-0000-14d00d1f8e35
+[14:53:17.105] [cpStack] SETUP screen NATIVE (main, dataPort=44771, id=12150632370517593941)
+[14:53:17.199] [Perf] AppStart→FirstFrame: 20459409 ms
+[14:53:18.974] [cpStack] < POST /command (body 83B)
+[14:53:18.975] [cpStack] suggestUI (0 urls, not shown)
+[14:53:19.362] [cpStack] < POST /command (body 232B)
+[14:53:20.177] [cpStack] < POST /command (body 232B)
+[14:53:20.729] [cpStack] < POST /command (body 232B)
+[14:53:29.269] [cpStack] < POST /command (body 232B)
+[14:53:29.877] [cpStack] < POST /command (body 232B)
+[14:53:30.480] [cpStack] < POST /command (body 232B)
+[14:53:32.787] [cpStack] < POST /command (body 232B)
+[14:53:33.405] [cpStack] < POST /command (body 232B)
+[14:53:34.383] [cpStack] < POST /command (body 232B)
+[14:53:35.282] [cpStack] < POST /command (body 73B)
+[14:53:35.283] [cpStack] requestUI → host UI requested
+[14:53:47.200] [cpStack] < POST /command (body 112B)
+[14:53:47.200] [helper] [livi-helper] [cp] power level=37 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:54:07.119] [cpStack] < POST /command (body 112B)
+[14:54:07.120] [helper] [livi-helper] [cp] power level=36 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:54:16.075] [cpStack] < POST /command (body 232B)
+[14:54:16.109] [cpStack] < POST /command (body 83B)
+[14:54:16.110] [cpStack] suggestUI (0 urls, not shown)
+[14:54:16.494] [cpStack] < POST /command (body 83B)
+[14:54:16.494] [cpStack] suggestUI (0 urls, not shown)
+[14:54:17.486] [cpStack] < POST /command (body 117B)
+[14:54:17.486] [cpStack] duckAudio volume=-13.979399681091309dB (level=0.200) durationMs=500
+[14:54:18.031] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 240B)
+[14:54:18.032] [cpStack] SETUP audio stream type 101
+[14:54:18.041] [cpStack] SETUP audio (type 101, audioType=default, format=0x40000000, codec=opus (gst decode), audioLatencyMs=80, dataPort=48382, controlPort=54197, id=14331428556068242418)
+[14:54:20.536] [cpStack] < POST /command (body 99B)
+[14:54:20.536] [cpStack] unduckAudio durationMs=500
+[14:54:21.056] [cpStack] < POST /command (body 83B)
+[14:54:21.056] [cpStack] suggestUI (0 urls, not shown)
+[14:54:21.072] [cpStack] < POST /command (body 232B)
+[14:54:22.245] [cpStack] < POST /command (body 117B)
+[14:54:22.245] [cpStack] duckAudio volume=-13.979399681091309dB (level=0.200) durationMs=500
+[14:54:22.526] [cpStack] < TEARDOWN rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 69B)
+[14:54:22.527] [cpStack] TEARDOWN streams 101
+[14:54:22.765] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 240B)
+[14:54:22.766] [cpStack] SETUP audio stream type 101
+[14:54:22.775] [cpStack] SETUP audio (type 101, audioType=default, format=0x40000000, codec=opus (gst decode), audioLatencyMs=80, dataPort=38014, controlPort=55822, id=2980792137258518818)
+[14:54:25.336] [cpStack] < POST /command (body 99B)
+[14:54:25.336] [cpStack] unduckAudio durationMs=500
+[14:54:27.126] [cpStack] < POST /command (body 112B)
+[14:54:27.126] [helper] [livi-helper] [cp] power level=34 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:54:27.325] [cpStack] < TEARDOWN rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 69B)
+[14:54:27.325] [cpStack] TEARDOWN streams 101
+[14:54:47.157] [cpStack] < POST /command (body 112B)
+[14:54:47.158] [helper] [livi-helper] [cp] power level=32 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:55:07.095] [cpStack] < POST /command (body 112B)
+[14:55:07.096] [helper] [livi-helper] [cp] power level=30 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:55:27.093] [cpStack] < POST /command (body 112B)
+[14:55:27.094] [helper] [livi-helper] [cp] power level=28 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:10.944] [cpStack] < POST /command (body 73B)
+[14:57:10.944] [cpStack] requestUI → host UI requested
+[14:57:21.805] [cpStack] < POST /command (body 73B)
+[14:57:21.805] [cpStack]   body: {"type":"requestUI","params":{}}
+[14:57:21.805] [cpStack] requestUI → host UI requested
+[14:57:32.568] [cpStack] < POST /command (body 111B)
+[14:57:32.569] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,21,64,251,112,10,221,64,64,0,11,78,13,0,5,0,0,0,21]}}}
+[14:57:32.569] [helper] [livi-helper] [cp] wireless CarPlay status: 0
+[14:57:32.662] [cpStack] < TEARDOWN rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 117B)
+[14:57:32.662] [cpStack]   body: {"streams":[{"type":110,"uuid":"b7e6c5a0-1111-4000-8000-000000000001"}]}
+[14:57:32.662] [cpStack] TEARDOWN streams 110
+[14:57:32.679] [cpStack] < TEARDOWN rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 117B)
+[14:57:32.679] [cpStack]   body: {"streams":[{"type":111,"uuid":"b7e6c5a0-2222-4000-8000-000000000002"}]}
+[14:57:32.679] [cpStack] TEARDOWN streams 111
+[14:57:32.684] [cpStack] < TEARDOWN rtsp://fe80::2ecf:67ff:fe3c:67f2/15960607999989334300 (body 42B)
+[14:57:32.685] [cpStack]   body: {}
+[14:57:32.685] [cpStack] TEARDOWN (session)
+[14:57:32.686] [helper] [livi-helper] [cp] session ended: IncompleteReadError('0 bytes read on a total of 6 expected bytes')
+[14:57:32.688] [cpStack] control connection closed fe80::476:abe0:ccfe:1e08%wlan0:49165
+[14:57:32.691] ══════ SESSIONS · close #1/carplay → IDLE ══════
+  (no sessions)
+[14:57:32.695] [cpStack] event channel closed
+[14:57:32.696] [helper] [livi-helper] [cp] reconnect-targets: {'14:D0:0D:2A:29:5C': '00000000-deca-fade-deca-deafdecacafe'}
+[14:57:32.844] [helper] [livi-helper] [cp] wifi left mac=14:d0:0d:1d:38:11 ip=10.10.0.25
+[14:57:32.845] [SESSIONS] closeByDeviceOnTransport in={"wifiMac":"14:d0:0d:1d:38:11","ip":"10.10.0.25"} t=wifi → match=NONE
+[14:57:34.825] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C paired+disconnected -> nudge
+[14:57:34.894] [ProjectionService] wireless AA bring-up (listener already armed)
+[14:57:35.234] [helper] [livi-helper] reconnect: 14:D0:0D:2A:29:5C wake-up attempt 1/5 failed: Call failed: br-connection-refused
+[14:57:35.291] [helper] new bluetooth connection /org/bluez/hci0/dev_14_D0_0D_2A_29_5C /org/bluez/iap_server
+[14:57:35.291] [helper] [livi-helper] [cp] phone connected over RFCOMM mac=14:D0:0D:2A:29:5C
+[14:57:36.147] [helper] [livi-helper] [cp] identification: sending accessory info
+[14:57:36.423] [helper] [livi-helper] [cp] identification: accepted
+[14:57:36.425] [helper] [livi-helper] [cp] auth: sending MFi certificate
+[14:57:36.705] [helper] [livi-helper] [cp] auth: signing challenge
+[14:57:37.300] [helper] [livi-helper] [cp] auth: succeeded
+[14:57:37.300] [helper] [livi-helper] [cp] nowplaying: subscribed (bt)
+[14:57:37.300] [helper] [livi-helper] [cp] navigation: subscribed (bt)
+[14:57:37.300] [helper] [livi-helper] [cp] power: subscribed (bt)
+[14:57:37.300] [helper] [livi-helper] [cp] cellular: subscribed (bt)
+[14:57:37.300] [helper] [livi-helper] [cp] call state: subscribed (bt)
+[14:57:37.369] [helper] [livi-helper] [cp] phone requested Wi-Fi config, replying with AP credentials
+[14:57:37.369] [helper] [livi-helper] [cp] vehicle status: subscribed (bt)[cp] re-browsing _carplay-ctrl (15 rounds, ~22s)
+[14:57:37.370] [helper] [livi-helper] [cp] wireless CarPlay status: 1
+[14:57:37.439] [helper] [livi-helper] [cp] device transport identifier: bt='14:d0:0d:2a:29:5c' usb='f5a196b7bae1cdc7fa59dda3c305ea7010a0739f'
+[14:57:37.457] [helper] [livi-helper] [cp] device time: offset -0.5s, keeping the system clock
+[14:57:37.514] [helper] [livi-helper] [cp] CarPlayStartSession sent (wireless): iface=wlan0 ssid=Carpi channel=36 fe80=fe80::2ecf:67ff:fe3c:67f2 port=7000
+[14:57:37.514] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=128)
+[14:57:37.514] [hwaddr] WiFi BSSID detected: 2C:CF:67:3C:67:F2 (wlan0)
+[14:57:37.524] [hwaddr] BT MAC detected from busctl: 2C:CF:67:3C:67:F4 (hci0)
+[14:57:37.524] ══════ SESSIONS · create #2 carplay in={"btMac":"14:d0:0d:2a:29:5c","wifiMac":"","usbUdid":""} ══════
+  #2  carplay    wifi held   main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c
+[14:57:37.525] [ProjectionService] active session -> #2 carplay
+[14:57:37.526] [SESSIONS] codec-restore #2 carplay: session=- map=- → gstVideoCodec=h264
+[14:57:37.526] ══════ SESSIONS · activate #2 carplay (prev none) ══════
+  #2  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c
+[14:57:37.526] ══════ SESSIONS · upsert #2 carplay in={"btMac":"14:D0:0D:2A:29:5C","wifiMac":"","usbUdid":""} ══════
+  #2  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c
+[14:57:37.527] [helper] [livi-helper] [cp] power charging=False cid= phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:37.527] [helper] [livi-helper] [cp] reconnect-targets: {}
+[14:57:37.664] [helper] [livi-helper] [cp] power level=28 cid= phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:37.747] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=129)
+[14:57:37.748] [helper] [livi-helper] [cp] cellular signal=1 carrier=无SIM卡 cellularSupported=True cid= phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:41.415] [helper] [livi-helper] [cp] wifi joined mac=14:d0:0d:1d:38:11 ip=10.10.0.25
+[14:57:41.415] [helper] [livi-helper] [cp] wifi joined ip=10.10.0.25 -> re-browsing for _carplay-ctrl
+[14:57:41.415] [helper] [cp] re-browse already running, skipping duplicate
+[14:57:41.776] [CpManager] control connection from fe80::476:abe0:ccfe:1e08%wlan0:49224
+[14:57:41.776] [hwaddr] WiFi BSSID detected: 2C:CF:67:3C:67:F2 (wlan0)
+[14:57:41.787] [hwaddr] BT MAC detected from busctl: 2C:CF:67:3C:67:F4 (hci0)
+[14:57:41.787] [cpStack] control connection from fe80::476:abe0:ccfe:1e08%wlan0:49224
+[14:57:41.787] [cpStack] < POST /pair-verify (body 37B)
+[14:57:41.787] [cpStack]   body: not a plist (37B)
+[14:57:41.789] [pairVerify] M1->M2
+[14:57:41.797] [cpStack] < POST /pair-verify (body 125B)
+[14:57:41.797] [cpStack]   body: not a plist (125B)
+[14:57:41.797] [pairVerify] M3->M4 verified (controller 00000000-0000-0000-0000-14d00d1f8e35)
+[14:57:41.798] [cpStack] control channel encrypted
+[14:57:41.800] [cpStack] < POST /auth-setup (body 33B)
+[14:57:41.800] [cpStack]   body: not a plist (33B)
+[14:57:42.380] [authSetup] signed (cert 609B, sig 64B, sha256)
+[14:57:42.410] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/11632862901366113667 (body 484B)
+[14:57:42.411] [cpStack]   body: {"timingPort":56933,"features":["uiContext","viewAreas","cornerMasks","focusTransfer","h.264Level5.1","mainBuffered","altScreen","enhancedSiri"],"sourceVersion":"695.5.1","keepAliveLowPower":true,"model":"iPhone10,1","deviceID":"14:d0:0d:2a:29:5c","osBuildVersion":"20H392","macAddress":"14:D0:0D:1D:38:11","sessionUUID":"A1703B2C-DCBF-4583-865C-D45E48646D30","name":"iPhone","statsCollectionEnabled":true}
+[14:57:42.411] ══════ SESSIONS · reassign #2 carplay → new driver ══════
+  #2  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c
+[14:57:42.411] [SESSIONS] closeByDriver → NO matching session
+[14:57:42.411] ══════ SESSIONS · upsert #2 carplay in={"btMac":"14:d0:0d:2a:29:5c","wifiMac":"14:d0:0d:1d:38:11"} ══════
+  #2  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c wifi=14:d0:0d:1d:38:11
+[14:57:42.412] [cpTiming] driving clock sync to fe80::476:abe0:ccfe:1e08%wlan0:56933
+[14:57:42.412] [cpStack] SETUP session (timingPort=51345, eventPort=33267, keepAlivePort=54960)
+[14:57:42.418] [cpStack] event channel connected
+[14:57:42.424] [cpStack] < GET /info (body 177B)
+[14:57:42.424] [cpStack]   body: {"altScreenURLs":["maps:/car/instrumentcluster/map","maps:/car/instrumentcluster/instructioncard","maps:/car/instrumentcluster"]}
+[14:57:42.424] [hwaddr] WiFi BSSID detected: 2C:CF:67:3C:67:F2 (wlan0)
+[14:57:42.434] [hwaddr] BT MAC detected from busctl: 2C:CF:67:3C:67:F4 (hci0)
+[14:57:42.434] [cpStack] /info request from phone: {"altScreenURLs":["maps:/car/instrumentcluster/map","maps:/car/instrumentcluster/instructioncard","maps:/car/instrumentcluster"]}
+[14:57:42.434] [cpStack] /info audio: disableAudioOutput=false audioFormats=9 audioLatencies=9
+[14:57:42.447] [cpStack] < RECORD rtsp://fe80::2ecf:67ff:fe3c:67f2/11632862901366113667 (body 0B)
+[14:57:42.447] [cpStack] RECORD (session started)
+[14:57:42.447] [helper] [livi-helper] [cp] [cp-sock] tunnel connection — running iAP2 over CarPlay (cid=00000000-0000-0000-0000-14d00d1f8e35)
+[14:57:42.447] [helper] [livi-helper] [cp] phone connected over Wi-Fi (CarPlay tunnel)
+[14:57:42.498] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/11632862901366113667 (body 252B)
+[14:57:42.499] [cpStack]   body: {"streams":[{"streamConnectionID":335712669176841000,"timestampInfo":[{"name":"SubSu"},{"name":"BePxT"},{"name":"AfPxT"},{"name":"BefEn"},{"name":"EmEnc"}],"latencyMs":75,"type":111,"uuid":"b7e6c5a0-2222-4000-8000-000000000002"}]}
+[14:57:42.499] [cpStack] SETUP screen NATIVE (cluster, dataPort=44417, id=335712669176841009)
+[14:57:42.522] [cpStack] < POST /command (body 232B)
+[14:57:42.523] [cpStack]   body: {"type":"modesChanged","params":{"appStates":[{"entity":0,"appStateID":2},{"entity":0,"speechMode":18446744073709552000,"appStateID":1},{"entity":0,"appStateID":3}],"resources":[{"resourceID":2,"entity":2,"permanentEntity":2},{"resourceID":1,"entity":2,"permanentEntity":2}]}}
+[14:57:42.523] [cpStack] modesChanged {"appStates":[{"entity":0,"appStateID":2},{"entity":0,"speechMode":18446744073709552000,"appStateID":1},{"entity":0,"appStateID":3}],"resources":[{"resourceID":2,"entity":2,"permanentEntity":2},{"resourceID":1,"entity":2,"permanentEntity":2}]}
+[14:57:42.571] [cpStack] < POST /command (body 115B)
+[14:57:42.571] [cpStack]   body: {"type":"disableBluetooth","params":{"deviceID":"14:d0:0d:2a:29:5c"}}
+[14:57:42.571] [cpStack] disableBluetooth (deviceID=14:d0:0d:2a:29:5c) — disconnecting BT
+[14:57:42.576] [helper] [livi-helper] [cp] iAP2 link started (negotiate initiated, wifi)
+[14:57:42.607] [cpStack] < POST /command (body 94B)
+[14:57:42.607] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,85,2,0,238,16]}}}
+[14:57:42.615] [cpStack] < POST /command (body 119B)
+[14:57:42.615] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,29,192,212,99,0,147,1,4,255,255,0,0,0,0,0,0,10,0,2,11,2,1,12,1,2,212]}}}
+[14:57:42.620] [cpStack] < POST /command (body 106B)
+[14:57:42.620] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,16,64,213,99,10,21,64,64,0,6,29,0,93]}}}
+[14:57:42.621] [helper] [livi-helper] [cp] identification: sending accessory info
+[14:57:42.632] [cpStack] < POST /command (body 110B)
+[14:57:42.632] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,20,64,214,100,10,15,64,64,0,10,29,3,0,4,0,22,60]}}}
+[14:57:42.632] [helper] [livi-helper] [cp] identification REJECTED, flagged fields: ['location_information_component']
+[14:57:42.633] [helper] [livi-helper] [cp] identification: retrying without ['location_information_component']
+[14:57:42.640] [cpStack] < POST /command (body 106B)
+[14:57:42.641] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,16,64,215,101,10,17,64,64,0,6,29,2,91]}}}
+[14:57:42.641] [helper] [livi-helper] [cp] identification: accepted
+[14:57:42.643] [cpStack] < POST /command (body 106B)
+[14:57:42.643] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,16,64,216,101,10,16,64,64,0,6,170,0,208]}}}
+[14:57:42.644] [helper] [livi-helper] [cp] auth: sending MFi certificate
+[14:57:42.655] [cpStack] < POST /command (body 142B)
+[14:57:42.655] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,52,64,217,102,10,234,64,64,0,42,170,2,0,36,0,0,253,25,37,24,9,132,119,120,222,229,96,75,122,112,82,160,123,151,96,192,119,229,115,19,222,138,163,176,88,238,169,66,109]}}}
+[14:57:42.656] [helper] [livi-helper] [cp] auth: signing challenge
+[14:57:42.945] [cpStack] < POST /command (body 232B)
+[14:57:42.945] [cpStack]   body: {"type":"modesChanged","params":{"appStates":[{"entity":0,"appStateID":2},{"entity":0,"speechMode":18446744073709552000,"appStateID":1},{"entity":0,"appStateID":3}],"resources":[{"resourceID":2,"entity":2,"permanentEntity":2},{"resourceID":1,"entity":1,"permanentEntity":1}]}}
+[14:57:42.945] [cpStack] modesChanged {"appStates":[{"entity":0,"appStateID":2},{"entity":0,"speechMode":18446744073709552000,"appStateID":1},{"entity":0,"appStateID":3}],"resources":[{"resourceID":2,"entity":2,"permanentEntity":2},{"resourceID":1,"entity":1,"permanentEntity":1}]}
+[14:57:42.948] [cpStack] < SETUP rtsp://fe80::2ecf:67ff:fe3c:67f2/11632862901366113667 (body 252B)
+[14:57:42.948] [cpStack]   body: {"streams":[{"streamConnectionID":1090145208268507300,"timestampInfo":[{"name":"SubSu"},{"name":"BePxT"},{"name":"AfPxT"},{"name":"BefEn"},{"name":"EmEnc"}],"latencyMs":75,"type":110,"uuid":"b7e6c5a0-1111-4000-8000-000000000001"}]}
+[14:57:42.948] ══════ SESSIONS · upsert #2 carplay in={"controllerId":"00000000-0000-0000-0000-14d00d1f8e35"} ══════
+  #2  carplay    wifi ACTIVE main:- cluster:-         keys: bt=14:d0:0d:2a:29:5c wifi=14:d0:0d:1d:38:11 ctrl=00000000-0000-0000-0000-14d00d1f8e35
+[14:57:42.949] [cpStack] SETUP screen NATIVE (main, dataPort=35161, id=1090145208268507316)
+[14:57:43.121] [cpStack] < POST /command (body 106B)
+[14:57:43.121] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,16,64,218,103,10,12,64,64,0,6,170,5,203]}}}
+[14:57:43.122] [helper] [livi-helper] [cp] auth: succeeded
+[14:57:43.122] [helper] [livi-helper] [cp] nowplaying: subscribed (wifi)
+[14:57:43.122] [helper] [livi-helper] [cp] navigation: subscribed (wifi)
+[14:57:43.122] [helper] [livi-helper] [cp] power: subscribed (wifi)
+[14:57:43.122] [helper] [livi-helper] [cp] cellular: subscribed (wifi)
+[14:57:43.122] [helper] [livi-helper] [cp] call state: subscribed (wifi)
+[14:57:43.131] [cpStack] < POST /command (body 106B)
+[14:57:43.131] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,16,64,219,103,10,11,64,64,0,6,87,2,33]}}}
+[14:57:43.131] [helper] [livi-helper] [cp] phone requested Wi-Fi config, replying with AP credentials
+[14:57:43.131] [helper] [cp] re-browse already running, skipping duplicate
+[14:57:43.134] [cpStack] < POST /command (body 114B)
+[14:57:43.134] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,24,64,220,103,10,2,64,64,0,14,161,0,0,4,0,3,0,4,0,4,194]}}}
+[14:57:43.134] [helper] [livi-helper] [cp] vehicle status: subscribed (wifi)
+[14:57:43.141] [cpStack] < POST /command (body 111B)
+[14:57:43.141] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,21,64,221,103,10,4,64,64,0,11,78,13,0,5,0,0,1,20]}}}
+[14:57:43.141] [helper] [livi-helper] [cp] wireless CarPlay status: 1
+[14:57:43.146] [cpStack] < POST /command (body 173B)
+[14:57:43.146] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,83,64,222,103,10,197,64,64,0,73,78,14,0,22,0,0,49,52,58,100,48,58,48,100,58,50,97,58,50,57,58,53,99,0,0,45,0,1,102,53,97,49,57,54,98,55,98,97,101,49,99,100,99,55,102,97,53,57,100,100,97,51,99,51,48,53,101,97,55,48,49,48,97,48,55,51,57,102,0,175]}}}
+[14:57:43.146] [helper] [livi-helper] [cp] device transport identifier: bt='14:d0:0d:2a:29:5c' usb='f5a196b7bae1cdc7fa59dda3c305ea7010a0739f'
+[14:57:43.158] [cpStack] < POST /command (body 129B)
+[14:57:43.158] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,39,64,223,103,10,240,64,64,0,29,78,11,0,12,0,0,0,0,0,0,106,188,178,231,0,6,0,1,1,224,0,5,0,2,0,80]}}}
+[14:57:43.158] [helper] [livi-helper] [cp] device time: offset -0.2s, keeping the system clock
+[14:57:43.161] [cpStack] < POST /command (body 160B)
+[14:57:43.162] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,70,64,224,104,10,207,64,64,0,60,80,1,0,32,0,0,0,5,0,1,0,0,8,0,4,0,0,0,0,0,5,0,6,0,0,5,0,12,0,0,5,0,26,128,0,22,0,1,0,5,0,0,0,0,8,0,1,0,0,0,0,0,5,0,7,0,213]}}}
+[14:57:43.162] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=128)
+[14:57:43.167] [cpStack] < POST /command (body 112B)
+[14:57:43.168] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,22,64,225,104,12,252,128,4,0,0,0,0,0,0,0,0,0,2,122]}}}
+[14:57:43.172] [cpStack] < POST /command (body 111B)
+[14:57:43.172] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,21,64,226,108,10,250,64,64,0,11,174,1,0,5,0,4,0,189]}}}
+[14:57:43.173] [helper] [livi-helper] [cp] power charging=False cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:43.177] [cpStack] < POST /command (body 111B)
+[14:57:43.177] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,21,64,227,108,10,249,64,64,0,11,174,1,0,5,0,5,0,188]}}}
+[14:57:43.180] [cpStack] < POST /command (body 112B)
+[14:57:43.180] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,22,64,228,108,10,247,64,64,0,12,174,1,0,6,0,6,0,28,157]}}}
+[14:57:43.181] [helper] [livi-helper] [cp] power level=28 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:43.183] [cpStack] < POST /command (body 128B)
+[14:57:43.183] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,38,64,229,108,10,230,64,64,0,28,80,1,0,22,0,1,0,5,0,0,0,0,8,0,1,0,0,0,0,0,5,0,7,0,226]}}}
+[14:57:43.189] [cpStack] < POST /command (body 130B)
+[14:57:43.189] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,40,64,230,108,10,227,64,64,0,30,65,88,0,5,0,0,1,0,14,0,4,230,151,160,83,73,77,229,141,161,0,0,5,0,5,1,141]}}}
+[14:57:43.190] [helper] [livi-helper] [cp] cellular signal=1 carrier=无SIM卡 cellularSupported=True cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:43.192] [cpStack] < POST /command (body 133B)
+[14:57:43.192] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,43,64,231,108,10,223,64,64,0,33,80,1,0,27,0,0,0,5,0,1,0,0,8,0,4,0,0,0,0,0,5,0,6,0,0,5,0,12,0,197]}}}
+[14:57:43.194] [cpStack] < POST /command (body 111B)
+[14:57:43.194] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,21,64,232,108,10,244,64,64,0,11,65,85,0,5,0,2,0,216]}}}
+[14:57:43.196] [cpStack] < POST /command (body 115B)
+[14:57:43.197] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,25,64,233,108,10,239,64,64,0,15,80,1,0,9,0,0,0,5,0,26,129,119]}}}
+[14:57:43.197] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=129)
+[14:57:43.199] [cpStack] < POST /command (body 112B)
+[14:57:43.199] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,22,64,234,108,12,239,129,4,0,0,0,0,0,0,0,0,0,2,121]}}}
+[14:57:43.201] [cpStack] < POST /command (body 100B)
+[14:57:43.201] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,12,64,235,109,12,247,128,2,126]}}}
+[14:57:43.203] [cpStack] < POST /command (body 100B)
+[14:57:43.203] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,12,64,236,111,12,244,129,192,191]}}}
+[14:57:43.276] [helper] [livi-helper] [cp] cellular signal=1 carrier=无SIM卡 cellularSupported=True cid= phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:43.346] [helper] [livi-helper] [cp] nowplaying: artwork offered (ftid=130)
+[14:57:43.413] [cpTiming] clock synced: offset=-1790747263.037s rtt=1.8ms
+[14:57:44.950] [helper] [livi-helper] [cp] session ended: IncompleteReadError('0 bytes read on a total of 6 expected bytes')
+[14:57:44.951] [CpSession] BT disconnected for 14:d0:0d:2a:29:5c — iAP2 moves to tunnel
+[14:57:47.101] [cpStack] < POST /command (body 112B)
+[14:57:47.101] [cpStack]   body: {"type":"iAPSendMessage","params":{"data":{"type":"Buffer","data":[255,90,0,22,64,237,112,10,234,64,64,0,12,174,1,0,6,0,6,0,27,158]}}}
+[14:57:47.102] [helper] [livi-helper] [cp] power level=27 cid=00000000-0000-0000-0000-14d00d1f8e35 phoneId=14:d0:0d:2a:29:5c usbTransportId=f5a196b7bae1cdc7fa59dda3c305ea7010a0739f
+[14:57:58.829] [cpStack] < POST /command (body 73B)
+[14:57:58.829] [cpStack]   body: {"type":"requestUI","params":{}}
+[14:57:58.829] [cpStack] requestUI → host UI requested
