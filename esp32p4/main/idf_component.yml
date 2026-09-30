@@ -1,0 +1,41 @@
+dependencies:
+  idf: ">=6.0"
+
+  lvgl/lvgl:
+    version: "9.5.0"
+    public: true
+
+  waveshare/esp32_p4_wifi6_touch_lcd_4_3:
+    version: "==1.0.1"
+
+  # Wi-Fi 6 / BLE 5 through the onboard ESP32-C6 co-processor (SDIO, ESP-Hosted).
+  espressif/esp_hosted:
+    matches:
+      - if: "idf_version >= 6.0"
+        version: ">=2.12,<3.0"
+      - if: "idf_version < 6.0"
+        version: "1.4.*"
+
+  espressif/esp_wifi_remote:
+    matches:
+      - if: "idf_version >= 6.0"
+        version: ">=1.6,<2.0"
+      - if: "idf_version < 6.0"
+        version: "0.14.*"
+
+  # H.264 software decoder (CarPlay video is H.264; the P4 has no HW decoder).
+  espressif/esp_h264:
+    version: "~1.4.1"
+
+  # AAC / Opus / PCM audio codecs for CarPlay audio streams.
+  # v2.6+ ships P4 prebuilt libs that require chip rev >= 3.0; this board is rev1.3.
+  espressif/esp_audio_codec:
+    version: "<2.6"
+
+  # Bonjour/mDNS advertising so the iPhone can discover the CarPlay accessory.
+  espressif/mdns:
+    version: "*"
+
+  # Ed25519 (AirPlay pairing identity). IDF's mbedTLS does not wire Ed25519 into PSA.
+  espressif/libsodium:
+    version: "*"
