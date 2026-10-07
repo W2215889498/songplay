@@ -330,6 +330,12 @@ static void handle_message(video_chan_t *ch, const uint8_t *header, size_t body_
     }
     ch->counter++;
 
+    /* Retry cluster activation on every frame until the gate (main stream up,
+     * cluster config seen) is satisfied; iOS ignores an early showUI. */
+    if (ch->display) {
+        maybe_activate_cluster();
+    }
+
     size_t n = to_annexb(s_plain, ct_len, ch->nal_length_size, s_annexb, BODY_MAX);
     if (ch->dec_ready) {
         int64_t t0 = esp_timer_get_time();
@@ -441,6 +447,10 @@ esp_err_t xc_video_start(uint16_t type, const uint8_t key[32], uint16_t *out_por
         s_plain = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         s_annexb = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         s_rgb = heap_caps_malloc(PANEL_W * PANEL_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        /* -1 marks "no connection": a zero-initialized fd made the cluster
+         * activation gate pass before the main stream was even connected. */
+        s_ch[0].conn_fd = -1;
+        s_ch[1].conn_fd = -1;
     }
     if (s_body == NULL || s_plain == NULL || s_annexb == NULL || s_rgb == NULL) {
         return ESP_ERR_NO_MEM;

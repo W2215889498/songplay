@@ -249,6 +249,10 @@ Reference trace committed at `esp32p4/LIVI.log` (449 lines, one full session).
 
 ## 8. Evening session 2026-09-30 — cluster support, openh264, current blockers
 
+> Update 2026-10-07: both boards reflashed; **cluster display verified working on the
+> panel** after fixing the activation gate (see 8.3 item 2). Diff in this push:
+> `xc_video.c` only (conn_fd sentinel + activation retry).
+
 ### 8.1 Done tonight (all flashed and exercised on hardware)
 
 1. **AirPlay bring-up SOLVED** (details in section 6): the phone now completes
@@ -317,10 +321,26 @@ Reference trace committed at `esp32p4/LIVI.log` (449 lines, one full session).
      phone; consider re-sending the ACK (e.g. twice, +200 ms) during negotiation.
    - Note: the old iPhone DID accept the exact same code path earlier today, so this is
      phone-iOS-version specific.
-2. **Cluster map activation not yet verified end-to-end** (needs a session that reaches
-   video again; the showUI/forceKeyFrame path was added after the last successful video).
-   Verify with Apple Maps navigation active (LIVI doc: only the navigation app renders the
-   cluster map; Apple Maps is known-good).
+   - Update 2026-10-07: after reflashing both boards the phone engaged again and ran the
+     full session (identification -> MFi -> CarPlay -> cluster video). The earlier stall
+     was therefore at least partly the bridge's dirty RFCOMM state (item 4); keep this
+     item as "watch" rather than an open bug.
+2. **Cluster map activation: FIXED 2026-10-07 and verified on the panel.**
+   - Symptom: CarPlay connected, cluster stream (480x800) decoded and rendered every
+     frame, but the LCD stayed black.
+   - Root cause: `s_ch[i].conn_fd` is a zero-initialized static, and the activation gate
+     `if (s_ch[0].conn_fd < 0) return;` therefore passed **before the main stream was
+     connected**. `showUI`/`forceKeyFrame` were sent ~350 ms before
+     `ch110 video stream connected`; iOS ignores an early showUI and the cluster surface
+     stays empty/black (LIVI only activates after `mainStreamReady`).
+   - Fix (`xc_video.c`): initialize both `conn_fd` to -1 on first use, and retry
+     `maybe_activate_cluster()` from the cluster frame path on every frame until it
+     succeeds (covers the event-channel-not-ready window too).
+   - Verified live 2026-10-07: `ch110 video stream connected` -> `cluster: showUI ...
+     sent` -> `cluster: forceKeyFrame sent` -> cluster frames decode/render continuously
+     (~8 fps) and the LCD shows picture. For MAP content the phone needs an active
+     navigation (Apple Maps), per LIVI's cluster doc; the cluster UI itself renders
+     otherwise.
 3. **Old iPhone stops engaging CarPlay after repeated MFi rejections** - BT/HID stay
    connected but the phone no longer answers the marker. Recovery that worked: reboot /
    forget+re-pair the phone. With LIVI the user sees "配件不支持" and it recovers alone.
