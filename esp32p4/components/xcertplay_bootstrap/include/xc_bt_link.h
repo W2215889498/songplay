@@ -35,6 +35,29 @@ esp_err_t xc_link_send_csm(uint16_t msg_id, const uint8_t *body, size_t len);
 /** True when the RFCOMM channel to the phone is up (from bridge events). */
 bool xc_link_rfcomm_up(void);
 
+/*
+ * iAP2-over-CarPlay tunnel (wireless CarPlay handoff).
+ *
+ * After the phone bootstraps iAP2 over Bluetooth it sends `disableBluetooth`
+ * and expects the accessory to move the iAP2 link onto the CarPlay (Wi-Fi)
+ * tunnel: link sync frames and CSM messages travel as AirPlay event-channel
+ * `iAPSendMessage` commands, mirroring LIVI's bringup. When the tunnel comes
+ * up the RFCOMM link is dropped and re-negotiation starts from scratch
+ * (identification, MFi, subscriptions run again inside the tunnel).
+ */
+
+/** Register the transport that ships link bytes to the phone (event channel). */
+void xc_link_set_tunnel_tx(void (*tx)(const uint8_t *data, size_t len));
+
+/** Request the handoff; applied asynchronously by the link task. */
+esp_err_t xc_link_enter_tunnel(void);
+
+/** Feed iAP2 link bytes received from the phone over the tunnel. */
+void xc_link_tunnel_rx(const uint8_t *data, size_t len);
+
+/** True while the link is running over the CarPlay tunnel. */
+bool xc_link_in_tunnel(void);
+
 #ifdef __cplusplus
 }
 #endif

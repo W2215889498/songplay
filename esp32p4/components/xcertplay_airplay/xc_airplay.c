@@ -15,7 +15,11 @@
 #include "lwip/sockets.h"
 #include "xc_bplist.h"
 #include "xc_bplist_read.h"
+#include "xc_audio.h"
+#include "xc_bt_link.h"
+#include "xc_callcard.h"
 #include "xc_crypto.h"
+#include "xc_iap2.h"
 #include "xc_identity.h"
 #include "xc_mfi.h"
 #include "xc_srp.h"
@@ -112,6 +116,13 @@ void xc_airplay_device_id(char *out, size_t cap)
     snprintf(out, cap, "%s", tmp);
 }
 
+static volatile bool s_session_started;
+
+bool xc_airplay_session_started(void)
+{
+    return s_session_started;
+}
+
 static int push(xc_bplist_t *b, int *keys, int *vals, int n, const char *k, int v)
 {
     keys[n] = xc_bplist_str(b, k);
@@ -167,19 +178,40 @@ esp_err_t xc_airplay_build_info(uint8_t *buf, size_t cap, size_t *out_len)
 
     /* Second display entry: the instrument cluster / alt screen (type 111,
      * ALT_UUID). The phone then sets up the type-111 screen stream, which is
-     * the one this product renders. */
+     * the one this product renders. 240x400 is the portrait variant requested
+     * for comparison (map fits the portrait dev panel better). Physical size
+     * follows the reference default: 200 mm width, height derived from the
+     * aspect (LIVI getInfo.ts / xcertplay AirPlayDisplaySettings). */
     int dk2[12], dv2[12];
     n = 0;
     n = push(b, dk2, dv2, n, "uuid", xc_bplist_str(b, ALT_UUID));
     n = push(b, dk2, dv2, n, "type", xc_bplist_int(b, 111));
     n = push(b, dk2, dv2, n, "maxFPS", xc_bplist_int(b, 60));
-    n = push(b, dk2, dv2, n, "widthPixels", xc_bplist_int(b, 480));
-    n = push(b, dk2, dv2, n, "heightPixels", xc_bplist_int(b, 800));
-    n = push(b, dk2, dv2, n, "widthPhysical", xc_bplist_int(b, 93));
-    n = push(b, dk2, dv2, n, "heightPhysical", xc_bplist_int(b, 155));
+    n = push(b, dk2, dv2, n, "widthPixels", xc_bplist_int(b, 240));
+    n = push(b, dk2, dv2, n, "heightPixels", xc_bplist_int(b, 400));
+    n = push(b, dk2, dv2, n, "widthPhysical", xc_bplist_int(b, 12));
+    n = push(b, dk2, dv2, n, "heightPhysical", xc_bplist_int(b, 19));
     n = push(b, dk2, dv2, n, "features", xc_bplist_int(b, 0x0a));
     n = push(b, dk2, dv2, n, "primaryInputDevice", xc_bplist_int(b, 1));
-    n = push(b, dk2, dv2, n, "viewAreas", view_areas);
+    /* Per-display view area (LIVI builds one areaDict per display): the cluster
+     * gets its own 240x400 geometry instead of reusing the main screen's. */
+    int sk2[5], sv2[5];
+    sk2[0] = xc_bplist_str(b, "widthPixels");   sv2[0] = xc_bplist_int(b, 240);
+    sk2[1] = xc_bplist_str(b, "heightPixels");  sv2[1] = xc_bplist_int(b, 400);
+    sk2[2] = xc_bplist_str(b, "originXPixels"); sv2[2] = xc_bplist_int(b, 0);
+    sk2[3] = xc_bplist_str(b, "originYPixels"); sv2[3] = xc_bplist_int(b, 0);
+    sk2[4] = xc_bplist_str(b, "drawUIOutsideSafeArea"); sv2[4] = xc_bplist_bool(b, true);
+    int safe2 = xc_bplist_dict(b, sk2, sv2, 5);
+
+    int vk2[5], vv2[5];
+    vk2[0] = xc_bplist_str(b, "widthPixels");   vv2[0] = xc_bplist_int(b, 240);
+    vk2[1] = xc_bplist_str(b, "heightPixels");  vv2[1] = xc_bplist_int(b, 400);
+    vk2[2] = xc_bplist_str(b, "originXPixels"); vv2[2] = xc_bplist_int(b, 0);
+    vk2[3] = xc_bplist_str(b, "originYPixels"); vv2[3] = xc_bplist_int(b, 0);
+    vk2[4] = xc_bplist_str(b, "safeArea");      vv2[4] = safe2;
+    int view_area2 = xc_bplist_dict(b, vk2, vv2, 5);
+    int view_areas2 = xc_bplist_array(b, &view_area2, 1);
+    n = push(b, dk2, dv2, n, "viewAreas", view_areas2);
     n = push(b, dk2, dv2, n, "initialViewArea", xc_bplist_int(b, 0));
     int display_alt = xc_bplist_dict(b, dk2, dv2, n);
 
@@ -250,11 +282,16 @@ esp_err_t xc_airplay_build_info(uint8_t *buf, size_t cap, size_t *out_len)
     const int pcm = 0x3fc | 0xc000;
     const int pcm_mono = 0x154 | 0x4000;
     const int aac_lc = 0x800000;
+    /* 0x70000000 = Opus 16k/24k/48k mono. Wireless CarPlay only uses PCM over
+     * USB, so the low-latency streams (100/101) must offer Opus or the phone
+     * keeps navigation prompts and Siri on its own speaker. */
+    const int opus = 0x70000000;
     struct { int type; const char *audio; int out; } fmts[] = {
         { 100, "compatibility", pcm }, { 101, "compatibility", pcm },
-        { 100, "default", pcm }, { 100, "alert", pcm }, { 100, "media", pcm },
-        { 100, "telephony", pcm_mono }, { 100, "speechRecognition", pcm_mono },
-        { 101, "default", pcm }, { 102, "media", aac_lc },
+        { 100, "default", pcm | opus }, { 100, "alert", pcm | opus },
+        { 100, "media", pcm },
+        { 100, "telephony", pcm_mono | opus }, { 100, "speechRecognition", pcm_mono | opus },
+        { 101, "default", pcm | opus }, { 102, "media", aac_lc },
     };
     for (size_t i = 0; i < sizeof(fmts) / sizeof(fmts[0]); i++) {
         int fk[3], fv[3];
@@ -1227,8 +1264,16 @@ static void event_send_bytes(const uint8_t *data, size_t len)
         return;
     }
     /* Dedicated TX buffer: the control channel's s_tx may be in use by the
-     * RTSP task while the video task sends these commands. */
+     * RTSP task while other tasks send these commands. Serialize senders: the
+     * iAP2 tunnel ships link frames from the bt_link task. */
     EXT_RAM_BSS_ATTR static uint8_t ev_tx[XC_CTRL_MAX + 16];
+    static SemaphoreHandle_t ev_lock;
+    if (ev_lock == NULL) {
+        ev_lock = xSemaphoreCreateMutex();
+    }
+    if (ev_lock != NULL) {
+        xSemaphoreTake(ev_lock, portMAX_DELAY);
+    }
     size_t off = 0;
     while (off < len) {
         size_t chunk = (len - off) > XC_CTRL_MAX ? XC_CTRL_MAX : (len - off);
@@ -1237,12 +1282,15 @@ static void event_send_bytes(const uint8_t *data, size_t len)
         ctrl_nonce(s_ev_wr, nonce);
         if (xc_chacha20poly1305_seal(s_ev_wkey, nonce, hdr, 2, data + off, chunk, ev_tx,
                                      ev_tx + chunk) != ESP_OK) {
-            return;
+            break;
         }
         send_all(s_event_conn, hdr, sizeof(hdr));
         send_all(s_event_conn, ev_tx, chunk + 16);
         s_ev_wr++;
         off += chunk;
+    }
+    if (ev_lock != NULL) {
+        xSemaphoreGive(ev_lock);
     }
 }
 
@@ -1260,14 +1308,40 @@ static void event_send_command(const uint8_t *body, size_t body_len)
                       "Content-Length: %u\r\n"
                       "CSeq: %u\r\n\r\n",
                       (unsigned)body_len, (unsigned)s_ev_cseq);
-    static uint8_t cmd[512];
-    if ((size_t)hn + body_len > sizeof(cmd)) {
+    EXT_RAM_BSS_ATTR static uint8_t cmd_buf[4096];
+    if ((size_t)hn + body_len > sizeof(cmd_buf)) {
         return;
     }
-    memcpy(cmd, head, (size_t)hn);
-    memcpy(cmd + hn, body, body_len);
-    event_send_bytes(cmd, (size_t)hn + body_len);
+    memcpy(cmd_buf, head, (size_t)hn);
+    memcpy(cmd_buf + hn, body, body_len);
+    event_send_bytes(cmd_buf, (size_t)hn + body_len);
     ESP_LOGI(TAG, "event command sent (%u bytes)", (unsigned)body_len);
+}
+
+/* Ship iAP2 link bytes to the phone over the CarPlay tunnel
+ * (LIVI cpStack: {type:'iAPSendMessage', params:{data}} on the event channel). */
+static void tunnel_tx(const uint8_t *data, size_t len)
+{
+    if (len == 0 || len > 3900) {
+        return;
+    }
+    xc_bplist_t *b = xc_bplist_new();
+    if (b == NULL) {
+        return;
+    }
+    EXT_RAM_BSS_ATTR static uint8_t body[4096];
+    size_t out_len = 0;
+    int data_obj = xc_bplist_data(b, data, len);
+    int pk[1] = { xc_bplist_str(b, "data") };
+    int params = xc_bplist_dict(b, pk, &data_obj, 1);
+    int ck[2] = { xc_bplist_str(b, "type"), xc_bplist_str(b, "params") };
+    int cv[2] = { xc_bplist_str(b, "iAPSendMessage"), params };
+    int top = xc_bplist_dict(b, ck, cv, 2);
+    esp_err_t err = xc_bplist_serialize(b, top, body, sizeof(body), &out_len);
+    xc_bplist_free(b);
+    if (err == ESP_OK) {
+        event_send_command(body, out_len);
+    }
 }
 
 esp_err_t xc_airplay_cluster_map_enable(void)
@@ -1366,8 +1440,33 @@ static void ntp_client_task(void *arg)
 
 /* ---- /stream SETUP ---------------------------------------------------- */
 
+/* RTSP TEARDOWN body is {"streams": [type, ...]} (LIVI cpStack). Audio streams
+ * are short-lived (one per navigation prompt) and closed by type here. */
+static void handle_teardown(int fd, const rtsp_req_t *req)
+{
+    if (req->body_len > 0) {
+        xc_plist_t pl;
+        if (xc_plist_open(req->body, req->body_len, &pl) == ESP_OK) {
+            int root = xc_plist_root(&pl);
+            int streams = xc_plist_dict_get(&pl, root, "streams");
+            int count = (streams >= 0) ? xc_plist_array_count(&pl, streams) : 0;
+            for (int i = 0; i < count; i++) {
+                int64_t type = 0;
+                if (xc_plist_get_int(&pl, xc_plist_array_get(&pl, streams, i), &type)) {
+                    ESP_LOGI(TAG, "TEARDOWN stream type %d", (int)type);
+                    xc_audio_close((uint16_t)type);
+                }
+            }
+        }
+    }
+    send_status(fd, "200 OK", req);
+}
+
 #define STREAM_TYPE_MAIN_SCREEN 110
 #define STREAM_TYPE_ALT_SCREEN 111
+#define STREAM_TYPE_MAIN_AUDIO 100
+#define STREAM_TYPE_ALT_AUDIO 101
+#define STREAM_TYPE_MAIN_HIGH_AUDIO 102
 
 static void handle_stream(int fd, const rtsp_req_t *req)
 {
@@ -1391,6 +1490,7 @@ static void handle_stream(int fd, const rtsp_req_t *req)
         /* Device-information SETUP: the phone sends its own parameters and
          * expects the timing / keep-alive / event channels plus the CarPlay
          * feature flags back (see xcertplay AirPlaySession.handleSetup). */
+        s_session_started = true;
         aux_start();
 
         /* Drive clock sync towards the phone's timing port (like xcertplay). */
@@ -1467,10 +1567,10 @@ static void handle_stream(int fd, const rtsp_req_t *req)
         send_status(fd, "500 Internal Server Error", req);
         return;
     }
-    int vals[8];
+    int vals[12];
     int nv = 0;
 
-    for (int i = 0; i < count && nv < 8; i++) {
+    for (int i = 0; i < count && nv < 12; i++) {
         int s = xc_plist_array_get(&pl, streams, i);
         int64_t type = 0;
         xc_plist_get_int(&pl, xc_plist_dict_get(&pl, s, "type"), &type);
@@ -1496,8 +1596,43 @@ static void handle_stream(int fd, const rtsp_req_t *req)
                 }
             }
         }
-        /* Unsupported stream types (audio, data, ...) are omitted from the
-         * reply, like xcertplay/LIVI, so iOS only sees the streams we accept. */
+        if ((type == STREAM_TYPE_MAIN_AUDIO || type == STREAM_TYPE_ALT_AUDIO ||
+             type == STREAM_TYPE_MAIN_HIGH_AUDIO) &&
+            id[0]) {
+            char salt[64];
+            snprintf(salt, sizeof(salt), "DataStream-Salt%s", id);
+            uint8_t key[32];
+            int64_t fmt = 0;
+            xc_plist_get_int(&pl, xc_plist_dict_get(&pl, s, "audioFormat"), &fmt);
+            char atype[33] = "default";
+            if (!xc_plist_get_str(&pl, xc_plist_dict_get(&pl, s, "audioType"), atype,
+                                  sizeof(atype))) {
+                memcpy(atype, "default", sizeof("default"));
+            }
+            uint64_t conn_id = strtoull(id, NULL, 10);
+            uint16_t dport = 0, cport = 0;
+            if (xc_hkdf_sha512((const uint8_t *)salt, strlen(salt), s_shared, sizeof(s_shared),
+                               (const uint8_t *)"DataStream-Output-Encryption-Key",
+                               strlen("DataStream-Output-Encryption-Key"), key, sizeof(key)) ==
+                    ESP_OK &&
+                xc_audio_open((uint16_t)type, conn_id, key, (uint64_t)fmt, atype, &dport,
+                              &cport) == ESP_OK) {
+                /* The phone needs its streamConnectionID echoed back or it
+                 * tears the stream down immediately (LIVI cpStack). */
+                int dk[4] = { xc_bplist_str(b, "type"), xc_bplist_str(b, "dataPort"),
+                              xc_bplist_str(b, "controlPort"),
+                              xc_bplist_str(b, "streamConnectionID") };
+                int dv[4] = { xc_bplist_int(b, (uint64_t)type), xc_bplist_int(b, dport),
+                              xc_bplist_int(b, cport), xc_bplist_int(b, conn_id) };
+                vals[nv++] = xc_bplist_dict(b, dk, dv, 4);
+                ESP_LOGI(TAG, "/stream: audio type %d -> dataPort %u controlPort %u (id %s)",
+                         (int)type, dport, cport, id);
+                continue;
+            }
+            ESP_LOGW(TAG, "/stream: audio type %d rejected (id %s)", (int)type, id);
+        }
+        /* Unsupported stream types (data, ...) are omitted from the reply,
+         * like xcertplay/LIVI, so iOS only sees the streams we accept. */
         ESP_LOGI(TAG, "/stream: stream type %d unsupported, skipped", (int)type);
     }
 
@@ -1545,14 +1680,64 @@ static void handle_client(int fd)
             handle_pair_verify(fd, &req);
         } else if (strstr(req.path, "/auth-setup") != NULL) {
             handle_auth_setup(fd, &req);
+        } else if (strncmp(req.method, "TEARDOWN", 8) == 0) {
+            handle_teardown(fd, &req);
         } else if (strstr(req.path, "/stream") != NULL ||
                    strncmp(req.method, "SETUP", 5) == 0) {
             handle_stream(fd, &req);
         } else {
             /* iOS keep-alive chatter (/command, /feedback, OPTIONS) is answered
-             * with a bare 200, like xcertplay's unhandled-request path. */
-            ESP_LOGI(TAG, "ack request %s %s (%u body bytes)", req.method, req.path,
-                     (unsigned)req.body_len);
+             * with a bare 200, like xcertplay's unhandled-request path. Command
+             * bodies are inspected: iAPSendMessage carries the iAP2 stream when
+             * the phone moves it onto the CarPlay tunnel, disableBluetooth asks
+             * for that handoff, the rest is CarPlay UI/audio keep-alive. */
+            bool quiet = false;
+            if (strncmp(req.method, "POST", 4) == 0 && strstr(req.path, "/command") != NULL &&
+                req.body_len > 0) {
+                xc_plist_t cpl;
+                if (xc_plist_open(req.body, req.body_len, &cpl) == ESP_OK) {
+                    char ctype[64] = { 0 };
+                    if (xc_plist_get_str(
+                            &cpl, xc_plist_dict_get(&cpl, xc_plist_root(&cpl), "type"), ctype,
+                            sizeof(ctype)) &&
+                        ctype[0]) {
+                        if (strcmp(ctype, "iAPSendMessage") == 0) {
+                            quiet = true;
+                            int params = xc_plist_dict_get(&cpl, xc_plist_root(&cpl), "params");
+                            int data_node =
+                                params >= 0 ? xc_plist_dict_get(&cpl, params, "data") : -1;
+                            const uint8_t *dp = NULL;
+                            size_t dl = 0;
+                            if (data_node >= 0 && xc_plist_get_data(&cpl, data_node, &dp, &dl) &&
+                                dl > 0) {
+                                xc_link_tunnel_rx(dp, dl);
+                            }
+                        } else {
+                            ESP_LOGI(TAG, "command type='%s'", ctype);
+                            if (strcmp(ctype, "disableBluetooth") == 0) {
+                                ESP_LOGI(TAG,
+                                         "disableBluetooth: handing iAP2 to the CarPlay tunnel");
+                                xc_link_enter_tunnel();
+                            }
+                            if ((strcmp(ctype, "modesChanged") == 0 ||
+                                 strcmp(ctype, "duckAudio") == 0 ||
+                                 strcmp(ctype, "unduckAudio") == 0) &&
+                                req.body_len <= 256) {
+                                char hx[3 * 256 + 1];
+                                for (size_t k = 0; k < req.body_len; k++) {
+                                    sprintf(hx + k * 3, "%02x ", req.body[k]);
+                                }
+                                hx[req.body_len * 3] = '\0';
+                                ESP_LOGI(TAG, "command body: %s", hx);
+                            }
+                        }
+                    }
+                }
+            }
+            if (!quiet) {
+                ESP_LOGI(TAG, "ack request %s %s (%u body bytes)", req.method, req.path,
+                         (unsigned)req.body_len);
+            }
             send_status(fd, "200 OK", &req);
         }
         if (!req.keep_alive) {
@@ -1593,8 +1778,11 @@ static void rtsp_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
+        ESP_LOGI(TAG, "control connection from %s:%u", inet_ntoa(src.sin_addr),
+                 ntohs(src.sin_port));
         handle_client(fd);
         close(fd);
+        ESP_LOGW(TAG, "control connection closed");
     }
 }
 
@@ -1619,24 +1807,81 @@ static void selftest_task(void *arg)
     }
     const char *req = "GET /info RTSP/1.0\r\nUser-Agent: xcertplay-selftest\r\n\r\n";
     send_all(fd, req, strlen(req));
-    char resp[512];
-    int nrecv = recv(fd, resp, sizeof(resp) - 1, 0);
-    if (nrecv > 0) {
-        resp[nrecv] = '\0';
-        char *eol = strstr(resp, "\r\n");
-        if (eol) {
-            *eol = '\0';
+    /* Read the whole reply and hex-dump the /info body once at boot: the phone
+     * decides on audio (Opus formats) etc. from exactly these bytes, so a dump
+     * makes wire-level diffs against the reference encoder possible. */
+    uint8_t *resp = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (resp == NULL) {
+        close(fd);
+        vTaskDelete(NULL);
+        return;
+    }
+    int total = 0;
+    int body_off = -1;
+    long content_len = -1;
+    while (total < 8192) {
+        int r = recv(fd, resp + total, 8192 - total, 0);
+        if (r <= 0) {
+            break;
         }
-        ESP_LOGI(TAG, "selftest /info -> %s", resp);
+        total += r;
+        if (body_off < 0) {
+            for (int i = 0; i + 3 < total; i++) {
+                if (resp[i] == '\r' && resp[i + 1] == '\n' && resp[i + 2] == '\r' &&
+                    resp[i + 3] == '\n') {
+                    body_off = i + 4;
+                    if (body_off < total) {
+                        uint8_t saved = resp[body_off];
+                        resp[body_off] = 0;
+                        char *cl = strstr((char *)resp, "Content-Length: ");
+                        if (cl != NULL) {
+                            content_len = strtol(cl + 16, NULL, 10);
+                        }
+                        resp[body_off] = saved;
+                    }
+                    break;
+                }
+            }
+        }
+        if (body_off >= 0 && content_len >= 0 && total - body_off >= content_len) {
+            break;
+        }
+    }
+    if (total > 0) {
+        if (body_off < 0) {
+            body_off = total; /* no body */
+        }
+        ESP_LOGI(TAG, "selftest /info body %u bytes", (unsigned)(total - body_off));
+        const uint8_t *body = resp + body_off;
+        int blen = total - body_off;
+        for (int off = 0; off < blen; off += 96) {
+            char hx[3 * 96 + 1];
+            int n = blen - off < 96 ? blen - off : 96;
+            for (int i = 0; i < n; i++) {
+                sprintf(hx + i * 3, "%02x ", body[off + i]);
+            }
+            hx[n * 3] = '\0';
+            ESP_LOGI(TAG, "INFO %04x: %s", (unsigned)off, hx);
+        }
     } else {
         ESP_LOGW(TAG, "selftest no response");
     }
+    free(resp);
     close(fd);
     vTaskDelete(NULL);
 }
 
 esp_err_t xc_airplay_start(void)
 {
+    /* When the phone hands iAP2 over to the CarPlay tunnel, link frames ship
+     * as event-channel iAPSendMessage commands (see xc_bt_link.c). */
+    xc_link_set_tunnel_tx(tunnel_tx);
+
+    /* Caller-ID card on the cluster: feed it the phone's CallStateUpdate
+     * stream and it overlays itself over the map while a call is up. */
+    xc_callcard_init();
+    xc_iap2_set_call_state_cb(xc_callcard_on_call);
+
     /* Keep these large buffers out of internal RAM: ESP-Hosted needs internal
      * DMA memory for its SDIO mempool at boot. */
     if (s_conn == NULL) {

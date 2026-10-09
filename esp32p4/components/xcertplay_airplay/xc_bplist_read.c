@@ -226,3 +226,18 @@ bool xc_plist_get_bool(const xc_plist_t *p, int ref, bool *out)
     *out = ((*obj & 0x0f) == 0x09);
     return true;
 }
+
+bool xc_plist_get_data(const xc_plist_t *p, int ref, const uint8_t **out, size_t *len)
+{
+    uint8_t type, low;
+    size_t count, off;
+    if (value_ptr(p, ref, &type, &low, &count, &off) == NULL || type != 0x40) {
+        return false;
+    }
+    if (off + count > p->len) {
+        return false;
+    }
+    *out = p->buf + off;
+    *len = count;
+    return true;
+}

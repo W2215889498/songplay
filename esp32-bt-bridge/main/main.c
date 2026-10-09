@@ -55,6 +55,9 @@ static const char *TAG = "bt_bridge";
 static EventGroupHandle_t s_evt;
 static uint32_t s_spp_handle;
 static volatile bool s_connected;
+/* Set by command 2 (P4 hands iAP2 to the CarPlay tunnel): stop auto-reconnect
+ * until command 1 explicitly asks for RFCOMM again. */
+static volatile bool s_suppress_connect;
 static esp_bd_addr_t s_peer;
 static volatile bool s_have_peer;
 static int s_disc_scn = -1;
@@ -177,6 +180,7 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
         if (param->open.status == ESP_SPP_SUCCESS) {
             s_spp_handle = param->open.handle;
             s_connected = true;
+            s_rx_logged = 0;
             notify("rfcomm open handle=%u", (unsigned)s_spp_handle);
             xEventGroupSetBits(s_evt, EV_SCN_OPEN);
         } else {
@@ -190,7 +194,9 @@ static void spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
         xEventGroupSetBits(s_evt, EV_SCN_CLOSED);
         break;
     case ESP_SPP_DATA_IND_EVT:
-        if (s_rx_logged < 4) {
+        /* Log the first 40 received frames (marker + sync alone used to fill
+         * the old 4-entry budget, hiding everything the phone sent later). */
+        if (s_rx_logged < 40) {
             char hex[3 * 16 + 1];
             size_t n = param->data_ind.len > 16 ? 16 : param->data_ind.len;
             for (size_t i = 0; i < n; i++) {
@@ -273,19 +279,19 @@ static void connect_task(void *arg)
 {
     char b[24];
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        if (!s_have_peer || s_connected) {
+        /* 9.3 item 3: keep the reconnect loop tight (was 3000 ms). */
+        vTaskDelay(pdMS_TO_TICKS(500));
+        if (!s_have_peer || s_connected || s_suppress_connect) {
             continue;
         }
 
         bda_str(s_peer, b, sizeof(b));
         notify("connecting to %s", b);
 
-        /* A short SDP pass is only informative: the phone answers the standard
-         * SPP query with nothing, its iAP2 service uses a 128-bit UUID. */
+        /* 9.3 item 3: no SDP discovery. The phone's iAP2 service hides behind
+         * a 128-bit UUID that the standard SPP query never returns; walking
+         * the channel numbers directly is faster. */
         s_disc_scn = -1;
-        esp_spp_start_discovery(s_peer);
-        vTaskDelay(pdMS_TO_TICKS(1500));
 
         bool tried[31] = { 0 };
         int order[32];
@@ -311,6 +317,8 @@ static void connect_task(void *arg)
             EventBits_t bits = xEventGroupWaitBits(s_evt, EV_SCN_OPEN, pdTRUE, pdFALSE,
                                                    pdMS_TO_TICKS(2500));
             if (!(bits & EV_SCN_OPEN)) {
+                /* Let the stack release the failed MCB before the next try. */
+                vTaskDelay(pdMS_TO_TICKS(200));
                 continue;
             }
             /* Opened: give the phone a moment to decide whether this really is
@@ -360,9 +368,13 @@ static void uart_task(void *arg)
                 }
             } else if (type == FT_CMD && len >= 1) {
                 if (payload[0] == 1) {
+                    s_suppress_connect = false;
                     xEventGroupSetBits(s_evt, EV_CONNECT_REQ);
-                } else if (payload[0] == 2 && s_connected) {
-                    esp_spp_disconnect(s_spp_handle);
+                } else if (payload[0] == 2) {
+                    s_suppress_connect = true;
+                    if (s_connected) {
+                        esp_spp_disconnect(s_spp_handle);
+                    }
                 }
             }
             memmove(buf, buf + 4 + len, used - 4 - len);

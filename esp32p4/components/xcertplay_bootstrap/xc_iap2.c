@@ -37,6 +37,20 @@ static const char *TAG = "xc_iap2";
 #define MSG_LOCATION_INFO 0xFFFB
 #define MSG_STOP_LOCATION_INFO 0xFFFC
 
+/* Subscriptions sent once authentication succeeds (LIVI bringup.rs). */
+#define MSG_START_CALL_UPDATES 0x4154
+#define MSG_START_COMM_UPDATES 0x4157
+#define MSG_START_NOW_PLAYING 0x5000
+#define MSG_START_ROUTE_GUIDANCE 0x5200
+#define MSG_START_POWER_UPDATES 0xAE00
+/* Update notifications the phone starts sending after subscribing. */
+#define MSG_CALL_STATE_UPDATE 0x4155
+#define MSG_COMM_UPDATE 0x4158
+#define MSG_POWER_UPDATE 0xAE01
+#define MSG_NOW_PLAYING_UPDATE 0x5001
+#define MSG_ROUTE_GUIDANCE_UPDATE 0x5201
+#define MSG_ROUTE_MANEUVER_UPDATE 0x5202
+
 /* Optional identification parameters the phone may reject; they are dropped
  * and the identification is re-sent (same strategy as LIVI). */
 #define OPT_VEHICLE_INFO (1u << 20)
@@ -340,6 +354,59 @@ static void send_start_session(void)
              AIRPLAY_PORT);
 }
 
+/* The phone expects these right after authentication before it treats the
+ * accessory as subscribed to its state streams (LIVI bringup.rs
+ * `subscriptions()`): now-playing, route guidance, power, communications and
+ * call state. The navigation-related ones matter for CarPlay services. */
+static void send_subscriptions(void)
+{
+    tlv_t t = { .buf = s_body, .cap = sizeof(s_body), .ok = true };
+
+    /* StartNowPlayingUpdates: media item + playback attribute masks. */
+    tlv_begin(&t, 0);
+    tlv_void(&t, 1);  /* title */
+    tlv_void(&t, 4);  /* duration_ms */
+    tlv_void(&t, 6);  /* album */
+    tlv_void(&t, 12); /* artist */
+    tlv_void(&t, 26); /* artwork */
+    tlv_end(&t);
+    tlv_begin(&t, 1);
+    tlv_void(&t, 0); /* status */
+    tlv_void(&t, 1); /* elapsed_ms */
+    tlv_void(&t, 7); /* app_name */
+    tlv_end(&t);
+    xc_link_send_csm(MSG_START_NOW_PLAYING, s_body, t.len);
+
+    /* StartRouteGuidanceUpdates: no display component filter. */
+    xc_link_send_csm(MSG_START_ROUTE_GUIDANCE, s_body, 0);
+
+    /* StartPowerUpdates. */
+    t = (tlv_t){ .buf = s_body, .cap = sizeof(s_body), .ok = true };
+    tlv_void(&t, 4); /* is_external_charger_connected */
+    tlv_void(&t, 5); /* battery_charging_state */
+    tlv_void(&t, 6); /* battery_charge_level */
+    xc_link_send_csm(MSG_START_POWER_UPDATES, s_body, t.len);
+
+    /* StartCommunicationsUpdates. */
+    t = (tlv_t){ .buf = s_body, .cap = sizeof(s_body), .ok = true };
+    tlv_void(&t, 0); /* signal_strength */
+    tlv_void(&t, 4); /* carrier_name */
+    tlv_void(&t, 5); /* cellular_supported */
+    xc_link_send_csm(MSG_START_COMM_UPDATES, s_body, t.len);
+
+    /* StartCallStateUpdates. */
+    t = (tlv_t){ .buf = s_body, .cap = sizeof(s_body), .ok = true };
+    tlv_void(&t, 0);  /* remote_id */
+    tlv_void(&t, 1);  /* display_name */
+    tlv_void(&t, 2);  /* status */
+    tlv_void(&t, 3);  /* direction */
+    tlv_void(&t, 4);  /* call_uuid */
+    tlv_void(&t, 11); /* disconnect_reason */
+    xc_link_send_csm(MSG_START_CALL_UPDATES, s_body, t.len);
+
+    ESP_LOGI(TAG, "subscriptions sent (nowplaying/route/power/comm/call)");
+}
+
 /* ---- location information (0xFFFA/0xFFFB/0xFFFC) ----------------------
  * The identification advertises Start/StopLocationInformation, so the phone
  * asks for NMEA data once the CarPlay session starts (xcertplay/LIVI answer
@@ -370,6 +437,64 @@ static void location_timer_cb(void *arg)
 }
 
 /* ---- message handling ------------------------------------------------- */
+
+static xc_call_state_cb_t s_call_cb;
+
+/* Plan A startup ordering: the AP may come up after the phone asked. */
+static bool s_ap_ready;
+static bool s_start_session_pending;
+
+void xc_iap2_notify_ap_ready(void)
+{
+    s_ap_ready = true;
+    if (s_start_session_pending) {
+        s_start_session_pending = false;
+        ESP_LOGI(TAG, "AP ready: sending deferred CarPlayStartSession");
+        send_start_session();
+    }
+}
+
+void xc_iap2_set_call_state_cb(xc_call_state_cb_t cb)
+{
+    s_call_cb = cb;
+}
+
+/* CallStateUpdate (0x4155): 0 remote_id, 1 display_name, 2 status,
+ * 3 direction, 8 service (see catplay-labs/catplay call enums). */
+static void handle_call_update(const uint8_t *body, size_t len)
+{
+    const uint8_t *p = NULL;
+    size_t l = 0;
+    char name[64] = "";
+    char number[48] = "";
+    int status = -1;
+    int direction = 0;
+    int service = 0;
+    if (tlv_find(body, len, 2, &p, &l) && l >= 1) {
+        status = p[0];
+    }
+    if (tlv_find(body, len, 3, &p, &l) && l >= 1) {
+        direction = p[0];
+    }
+    if (tlv_find(body, len, 8, &p, &l) && l >= 1) {
+        service = p[0];
+    }
+    if (tlv_find(body, len, 1, &p, &l) && l > 0) {
+        size_t n = l < sizeof(name) - 1 ? l : sizeof(name) - 1;
+        memcpy(name, p, n);
+        name[n] = '\0';
+    }
+    if (tlv_find(body, len, 0, &p, &l) && l > 0) {
+        size_t n = l < sizeof(number) - 1 ? l : sizeof(number) - 1;
+        memcpy(number, p, n);
+        number[n] = '\0';
+    }
+    ESP_LOGI(TAG, "call update: status=%d direction=%d service=%d name='%s' number='%s'", status,
+             direction, service, name, number);
+    if (s_call_cb != NULL && status >= 0) {
+        s_call_cb(status, direction, service, name, number);
+    }
+}
 
 static void on_message(uint16_t msg_id, const uint8_t *body, size_t len)
 {
@@ -463,6 +588,7 @@ static void on_message(uint16_t msg_id, const uint8_t *body, size_t len)
 
     case MSG_AUTH_SUCCEEDED:
         ESP_LOGI(TAG, "MFi authentication SUCCEEDED");
+        send_subscriptions();
         break;
     case MSG_AUTH_FAILED:
         ESP_LOGW(TAG, "MFi authentication FAILED");
@@ -475,7 +601,14 @@ static void on_message(uint16_t msg_id, const uint8_t *body, size_t len)
 
     case MSG_CARPLAY_AVAILABILITY:
         ESP_LOGI(TAG, "CarPlay availability received");
-        send_start_session();
+        if (s_ap_ready) {
+            send_start_session();
+        } else {
+            /* Plan A: iAP2 now starts before the Wi-Fi AP is up. Hold the
+             * start-session reply until the AP can actually accept the phone. */
+            s_start_session_pending = true;
+            ESP_LOGI(TAG, "CarPlayStartSession deferred until the AP is ready");
+        }
         break;
 
     case MSG_WIRELESS_UPDATE:
@@ -512,6 +645,34 @@ static void on_message(uint16_t msg_id, const uint8_t *body, size_t len)
             esp_timer_stop(s_loc_timer);
         }
         break;
+
+    /* State streams the phone pushes once subscribed: notifications, no
+     * response needed. Log the first of each kind so the subscription effect
+     * is visible, then stay quiet. */
+    case MSG_CALL_STATE_UPDATE:
+        handle_call_update(body, len);
+        break;
+    case MSG_COMM_UPDATE:
+    case MSG_POWER_UPDATE:
+    case MSG_NOW_PLAYING_UPDATE:
+    case MSG_ROUTE_GUIDANCE_UPDATE:
+    case MSG_ROUTE_MANEUVER_UPDATE: {
+        static uint16_t seen_ids[6];
+        static int n_seen;
+        bool found = false;
+        for (int i = 0; i < n_seen; i++) {
+            if (seen_ids[i] == msg_id) {
+                found = true;
+                break;
+            }
+        }
+        if (!found && n_seen < 6) {
+            seen_ids[n_seen++] = msg_id;
+            ESP_LOGI(TAG, "state update stream started: 0x%04X (%u bytes)", msg_id,
+                     (unsigned)len);
+        }
+        break;
+    }
 
     default:
         ESP_LOGI(TAG, "CSM 0x%04X unhandled (%u bytes)", msg_id, (unsigned)len);

@@ -1,0 +1,12 @@
+# ESP-IDF build output
+build/
+managed_components/
+sdkconfig.old
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Reference clones with their own git history (not part of this project's source)
+xcertplay/
+reference/

@@ -164,7 +164,12 @@ static int int_bytes(uint64_t v)
     if (v <= 0xffffffffULL) {
         return 4;
     }
-    return 8;
+    if (v <= 0x7fffffffffffffffULL) {
+        return 8;
+    }
+    /* Unsigned values above INT64_MAX (e.g. CarPlay streamConnectionIDs) use
+     * the 16-byte form, matching CoreFoundation's encoder. */
+    return 16;
 }
 
 static size_t int_obj_size(uint64_t v)
@@ -209,9 +214,15 @@ static void put_be(uint8_t **p, uint64_t v, int nbytes)
 static void write_int_obj(uint8_t **p, uint64_t v)
 {
     int nb = int_bytes(v);
-    int log = nb == 1 ? 0 : nb == 2 ? 1 : nb == 4 ? 2 : 3;
+    int log = nb == 1 ? 0 : nb == 2 ? 1 : nb == 4 ? 2 : nb == 8 ? 3 : 4;
     *(*p)++ = (uint8_t)(0x10 | log);
-    put_be(p, v, nb);
+    if (nb == 16) {
+        memset(*p, 0, 8);
+        *p += 8;
+        put_be(p, v, 8);
+    } else {
+        put_be(p, v, nb);
+    }
 }
 
 static void write_marker(uint8_t **p, uint8_t base, size_t count)

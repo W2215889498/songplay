@@ -7,10 +7,34 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "lwip/etharp.h"
+#include "lwip/netif.h"
 
 static const char *TAG = "xc_net";
 
 static bool s_ap_ready;
+
+/* The iPhone keeps its cached DHCP address but periodically rotates its Wi-Fi
+ * private MAC. A stale lwip ARP entry (IP -> old MAC) blackholes our TCP
+ * replies until the board reboots - that was the "tap connect does nothing"
+ * mystery. Purge the neighbour cache whenever a station joins or leaves so
+ * the mapping is relearned from the next packet. */
+static esp_err_t purge_arp_cache_cb(void *ctx)
+{
+    (void)ctx;
+    struct netif *nif;
+    NETIF_FOREACH(nif) {
+        etharp_cleanup_netif(nif);
+    }
+    ESP_LOGI(TAG, "ARP cache purged after station change");
+    return ESP_OK;
+}
+
+static void purge_arp_cache(void)
+{
+    /* Run in the lwip tcpip thread (safe for the ARP table). */
+    esp_netif_tcpip_exec(purge_arp_cache_cb, NULL);
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -19,9 +43,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t *e = (wifi_event_ap_staconnected_t *)data;
         ESP_LOGI(TAG, "station " MACSTR " joined", MAC2STR(e->mac));
+        purge_arp_cache();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
         wifi_event_ap_stadisconnected_t *e = (wifi_event_ap_stadisconnected_t *)data;
         ESP_LOGI(TAG, "station " MACSTR " left", MAC2STR(e->mac));
+        purge_arp_cache();
     }
 }
 

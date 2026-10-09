@@ -21,6 +21,10 @@ esp_err_t xc_airplay_build_info(uint8_t *buf, size_t cap, size_t *out_len);
 /** AirPlay device id (AP MAC) as a "AA:BB:.." string, used by iAP2 too. */
 void xc_airplay_device_id(char *out, size_t cap);
 
+/** True once a phone session reached the device-info SETUP (used to keep the
+ * deferred boot self-tests out of a live session). */
+bool xc_airplay_session_started(void);
+
 /**
  * Ask the phone to render the CarPlay navigation map on the instrument-cluster
  * (alt screen) display: sends the showUI and forceKeyFrame commands over the

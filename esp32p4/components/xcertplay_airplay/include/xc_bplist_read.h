@@ -53,6 +53,9 @@ bool xc_plist_get_str(const xc_plist_t *p, int ref, char *out, size_t cap);
 /** True when the object is a boolean true. */
 bool xc_plist_get_bool(const xc_plist_t *p, int ref, bool *out);
 
+/** Raw bytes of a data (<data>) object; *out points into the plist buffer. */
+bool xc_plist_get_data(const xc_plist_t *p, int ref, const uint8_t **out, size_t *len);
+
 #ifdef __cplusplus
 }
 #endif

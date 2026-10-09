@@ -3,9 +3,11 @@
 #include <string.h>
 
 #include "bsp/esp-bsp.h"
+#include "driver/ppa.h"
 #include "esp_heap_caps.h"
 #include "esp_h264_enc_single.h"
 #include "esp_h264_enc_single_hw.h"
+#include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -15,6 +17,7 @@
 #include "lwip/sockets.h"
 #include "wels_dec.h"
 #include "xc_airplay.h"
+#include "xc_callcard.h"
 #include "xc_crypto.h"
 
 static const char *TAG = "xc_video";
@@ -47,6 +50,8 @@ typedef struct {
     int nal_length_size;
     int video_w, video_h;
     volatile uint32_t frames;
+    int64_t stat_us;        /* periodic fps reporting window */
+    uint32_t stat_frames;
     TaskHandle_t task;
 } video_chan_t;
 
@@ -96,6 +101,73 @@ static void nonce64(uint64_t counter, uint8_t nonce[12])
     for (int i = 0; i < 8; i++) {
         nonce[4 + i] = (uint8_t)(counter >> (8 * i));
     }
+}
+
+/* Diagnostic: sample the pixel we just wrote in each DPI frame buffer and log
+ * whenever the "current display buffer" changes. The adapter's tear-avoid
+ * fb rotation can silently swap the video area back to a stale buffer; this
+ * pinpoints when and where that happens. */
+static void fb_probe(uint16_t ref, int x0, int y0)
+{
+    static void *fbs[3];
+    static int have;
+    static int last = -1;
+    if (have == 0) {
+        if (esp_lcd_dpi_panel_get_frame_buffer(bsp_display_get_panel_handle(), 3,
+                                               &fbs[0], &fbs[1], &fbs[2]) != ESP_OK) {
+            have = -1;
+            return;
+        }
+        have = 1;
+    }
+    if (have < 0) {
+        return;
+    }
+    uint16_t v[3];
+    int match = -1;
+    for (int i = 0; i < 3; i++) {
+        v[i] = ((const uint16_t *)fbs[i])[(size_t)y0 * PANEL_W + x0];
+        if (v[i] == ref) {
+            match = i;
+        }
+    }
+    if (match != last) {
+        ESP_LOGI(TAG, "fb probe: match %d -> %d (ref=%04x fb=[%04x %04x %04x])",
+                 last, match, ref, v[0], v[1], v[2]);
+        last = match;
+    }
+}
+
+/* Flicker diagnostics: watch the margin pixels of all three DPI frame buffers
+ * (outside the video rect) and log any change. A full-screen wipe by whatever
+ * writer shows up here; a panel-only artifact does not. */
+static void fb_watch_task(void *arg)
+{
+    (void)arg;
+    void *fbs[3] = { NULL, NULL, NULL };
+    if (esp_lcd_dpi_panel_get_frame_buffer(bsp_display_get_panel_handle(), 3,
+                                           &fbs[0], &fbs[1], &fbs[2]) != ESP_OK) {
+        vTaskDelete(NULL);
+        return;
+    }
+    uint16_t prev[6] = { 0 };
+    bool have = false;
+    while (s_running) {
+        uint16_t cur[6];
+        for (int i = 0; i < 3; i++) {
+            const uint16_t *fb = (const uint16_t *)fbs[i];
+            cur[i * 2 + 0] = fb[(size_t)8 * PANEL_W + 8];
+            cur[i * 2 + 1] = fb[(size_t)(PANEL_H - 8) * PANEL_W + (PANEL_W - 8)];
+        }
+        if (!have || memcmp(cur, prev, sizeof(cur)) != 0) {
+            ESP_LOGI(TAG, "fbwatch TL=[%04x %04x %04x] BR=[%04x %04x %04x]",
+                     cur[0], cur[2], cur[4], cur[1], cur[3], cur[5]);
+            memcpy(prev, cur, sizeof(cur));
+            have = true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    vTaskDelete(NULL);
 }
 
 /* Length-prefixed NALUs -> Annex B. */
@@ -165,6 +237,104 @@ static size_t avcc_to_annexb(const uint8_t *avcc, size_t len, uint8_t *out, size
     return w;
 }
 
+/* ---- YUV420 -> RGB565 conversion (PPA hardware, CPU fallback) --------- */
+
+/* The P4 PPA wants "Espressif YUV420" (fourcc OUYY_EVYY): each 2x2 luma block
+ * is packed into 6 bytes -- row0 = U Y00 Y01, row1 = V Y10 Y11. openh264
+ * outputs planar I420, so shuffle first; the PPA then does the colour
+ * conversion in hardware (the old CPU loop cost ~25 ms at 240x400). */
+static ppa_client_handle_t s_ppa;
+static uint8_t *s_yuv_pack;
+static size_t s_yuv_pack_sz;
+
+static esp_err_t i420_to_es420(int w, int h, const uint8_t *y, int ys, const uint8_t *u,
+                               const uint8_t *v, int uvs, int sx, int sy)
+{
+    if ((w & 1) || (h & 1) || (sx & 1) || (sy & 1)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t row = (size_t)w * 3 / 2;
+    for (int by = 0; by < h / 2; by++) {
+        const uint8_t *y0 = y + (size_t)(sy + by * 2) * ys + sx;
+        const uint8_t *y1 = y0 + ys;
+        const uint8_t *ur = u + (size_t)(sy / 2 + by) * uvs + sx / 2;
+        const uint8_t *vr = v + (size_t)(sy / 2 + by) * uvs + sx / 2;
+        uint8_t *r0 = s_yuv_pack + (size_t)(by * 2) * row;
+        uint8_t *r1 = r0 + row;
+        for (int bx = 0; bx < w / 2; bx++) {
+            r0[0] = ur[bx];
+            r0[1] = y0[2 * bx];
+            r0[2] = y0[2 * bx + 1];
+            r1[0] = vr[bx];
+            r1[1] = y1[2 * bx];
+            r1[2] = y1[2 * bx + 1];
+            r0 += 3;
+            r1 += 3;
+        }
+    }
+    return ESP_OK;
+}
+
+static bool ppa_convert(int cw, int chh, const uint8_t *y_plane, int y_stride,
+                        const uint8_t *u_plane, const uint8_t *v_plane, int uv_stride, int sx,
+                        int sy)
+{
+    if (s_ppa == NULL) {
+        ppa_client_config_t pc = { .oper_type = PPA_OPERATION_SRM, .max_pending_trans_num = 1 };
+        if (ppa_register_client(&pc, &s_ppa) != ESP_OK) {
+            ESP_LOGW(TAG, "PPA client register failed, using CPU conversion");
+            s_ppa = NULL;
+            return false;
+        }
+        ESP_LOGI(TAG, "PPA SRM client ready (hardware YUV420->RGB565)");
+    }
+    size_t need = (size_t)cw * chh * 3 / 2;
+    if (s_yuv_pack == NULL || s_yuv_pack_sz < need) {
+        if (s_yuv_pack != NULL) {
+            free(s_yuv_pack);
+            s_yuv_pack = NULL;
+        }
+        s_yuv_pack = heap_caps_aligned_alloc(128, need, MALLOC_CAP_SPIRAM);
+        s_yuv_pack_sz = need;
+        if (s_yuv_pack == NULL) {
+            return false;
+        }
+    }
+    if (i420_to_es420(cw, chh, y_plane, y_stride, u_plane, v_plane, uv_stride, sx, sy) !=
+        ESP_OK) {
+        return false;
+    }
+    ppa_srm_oper_config_t cfg = {
+        .in = {
+            .buffer = s_yuv_pack,
+            .pic_w = (uint32_t)cw,
+            .pic_h = (uint32_t)chh,
+            .block_w = (uint32_t)cw,
+            .block_h = (uint32_t)chh,
+            .srm_cm = PPA_SRM_COLOR_MODE_YUV420,
+            .yuv_range = PPA_COLOR_RANGE_LIMIT,
+            .yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601,
+        },
+        .out = {
+            .buffer = s_rgb,
+            .buffer_size = (uint32_t)cw * (uint32_t)chh * 2,
+            .pic_w = (uint32_t)cw,
+            .pic_h = (uint32_t)chh,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+        .scale_x = 1.0f,
+        .scale_y = 1.0f,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_ppa, &cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "PPA op failed (%s), CPU fallback", esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
 static void render_frame(video_chan_t *ch, int w, int h, int decode_ms)
 {
     const uint8_t *y_plane = wels_dec_plane(ch->dec, 0);
@@ -177,42 +347,76 @@ static void render_frame(video_chan_t *ch, int w, int h, int decode_ms)
     }
     int64_t t_render = esp_timer_get_time();
 
-    for (int y = 0; y < h; y++) {
-        const uint8_t *yr = y_plane + (size_t)y * (size_t)y_stride;
-        const uint8_t *ur = u_plane + (size_t)(y / 2) * (size_t)uv_stride;
-        const uint8_t *vr = v_plane + (size_t)(y / 2) * (size_t)uv_stride;
-        for (int x = 0; x < w; x++) {
-            int yv = yr[x] - 16;
-            int uv = ur[x / 2] - 128;
-            int vv = vr[x / 2] - 128;
-            if (yv < 0) {
-                yv = 0;
+    /* The stream can be larger than the panel (e.g. the standard 800x480
+     * cluster on the 480x800 dev panel): centre-crop it. */
+    int cw = w > PANEL_W ? PANEL_W : w;
+    int chh = h > PANEL_H ? PANEL_H : h;
+    int sx = (w - cw) / 2;
+    int sy = (h - chh) / 2;
+
+    int64_t t_conv = esp_timer_get_time();
+    if (!ppa_convert(cw, chh, y_plane, y_stride, u_plane, v_plane, uv_stride, sx, sy)) {
+        /* CPU fallback (also the path for odd dimensions / PPA failure). */
+        for (int y = 0; y < chh; y++) {
+            const uint8_t *yr = y_plane + (size_t)(sy + y) * (size_t)y_stride + sx;
+            const uint8_t *ur = u_plane + (size_t)((sy + y) / 2) * (size_t)uv_stride;
+            const uint8_t *vr = v_plane + (size_t)((sy + y) / 2) * (size_t)uv_stride;
+            for (int x = 0; x < cw; x++) {
+                int yv = yr[x] - 16;
+                int uv = ur[(sx + x) / 2] - 128;
+                int vv = vr[(sx + x) / 2] - 128;
+                if (yv < 0) {
+                    yv = 0;
+                }
+                int r = (298 * yv + 409 * vv + 128) >> 8;
+                int g = (298 * yv - 100 * uv - 208 * vv + 128) >> 8;
+                int b = (298 * yv + 516 * uv + 128) >> 8;
+                if (r < 0) r = 0; else if (r > 255) r = 255;
+                if (g < 0) g = 0; else if (g > 255) g = 255;
+                if (b < 0) b = 0; else if (b > 255) b = 255;
+                s_rgb[(size_t)y * cw + x] =
+                    (uint16_t)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
             }
-            int r = (298 * yv + 409 * vv + 128) >> 8;
-            int g = (298 * yv - 100 * uv - 208 * vv + 128) >> 8;
-            int b = (298 * yv + 516 * uv + 128) >> 8;
-            if (r < 0) r = 0; else if (r > 255) r = 255;
-            if (g < 0) g = 0; else if (g > 255) g = 255;
-            if (b < 0) b = 0; else if (b > 255) b = 255;
-            s_rgb[(size_t)y * w + x] =
-                (uint16_t)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
         }
     }
+    int conv_ms = (int)((esp_timer_get_time() - t_conv) / 1000);
 
     esp_lcd_panel_handle_t panel = bsp_display_get_panel_handle();
-    int x0 = (PANEL_W - w) / 2;
-    int y0 = (PANEL_H - h) / 2;
+    int x0 = (PANEL_W - cw) / 2;
+    int y0 = (PANEL_H - chh) / 2;
     bsp_display_lock(-1);
     if (!s_ui_cleared) {
         lv_obj_clean(lv_screen_active()); /* stop LVGL from overdrawing */
         s_ui_cleared = true;
     }
-    esp_lcd_panel_draw_bitmap(panel, x0, y0, x0 + w, y0 + h, s_rgb);
+    /* Blend the caller-ID card into the frame first: one panel write carries
+     * map + card together (a separate overlay blit would flash the map
+     * through the card on every frame). */
+    xc_callcard_compose(s_rgb, cw, chh);
+    esp_lcd_panel_draw_bitmap(panel, x0, y0, x0 + cw, y0 + chh, s_rgb);
     bsp_display_unlock();
+    fb_probe(s_rgb[0], x0, y0);
 
+    int64_t now_us = esp_timer_get_time();
+    int render_ms = (int)((now_us - t_render) / 1000);
     if (ch->frames < 20) {
-        ESP_LOGI(TAG, "ch%u frame %u timing: decode %d ms, render %d ms", (unsigned)ch->type,
-                 (unsigned)ch->frames, decode_ms, (int)((esp_timer_get_time() - t_render) / 1000));
+        ESP_LOGI(TAG, "ch%u frame %u timing: decode %d ms, conv %d ms, render %d ms",
+                 (unsigned)ch->type, (unsigned)ch->frames, decode_ms, conv_ms, render_ms);
+    }
+    /* Sustained fps every 5 s (feed_decoder bumps ch->frames right after this
+     * returns, so count the current frame here). */
+    if (ch->stat_us == 0) {
+        ch->stat_us = now_us;
+        ch->stat_frames = ch->frames;
+    } else if (now_us - ch->stat_us >= 5000000) {
+        uint32_t n = ch->frames + 1 - ch->stat_frames;
+        int64_t dt_us = now_us - ch->stat_us;
+        uint32_t fps10 = (uint32_t)((uint64_t)n * 10000000ULL / (uint64_t)dt_us);
+        ESP_LOGI(TAG, "ch%u fps %u.%u (%u frames in %d ms), decode %d ms, render %d ms",
+                 (unsigned)ch->type, (unsigned)(fps10 / 10), (unsigned)(fps10 % 10),
+                 (unsigned)n, (int)(dt_us / 1000), decode_ms, render_ms);
+        ch->stat_us = now_us;
+        ch->stat_frames = ch->frames + 1;
     }
 }
 
@@ -237,7 +441,7 @@ static void feed_decoder(video_chan_t *ch, const uint8_t *data, size_t len)
         ch->video_h = h;
         ESP_LOGI(TAG, "ch%u decoded resolution %dx%d", (unsigned)ch->type, w, h);
     }
-    if (!ch->display || w > PANEL_W || h > PANEL_H || s_rgb == NULL) {
+    if (!ch->display || s_rgb == NULL) {
         ch->frames++;
         return;
     }
@@ -446,7 +650,9 @@ esp_err_t xc_video_start(uint16_t type, const uint8_t key[32], uint16_t *out_por
         s_body = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         s_plain = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         s_annexb = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        s_rgb = heap_caps_malloc(PANEL_W * PANEL_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        /* PPA output requires L1+L2 cache-line alignment (128 B here). */
+        s_rgb = heap_caps_aligned_alloc(128, PANEL_W * PANEL_H * 2,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         /* -1 marks "no connection": a zero-initialized fd made the cluster
          * activation gate pass before the main stream was even connected. */
         s_ch[0].conn_fd = -1;
@@ -496,6 +702,11 @@ esp_err_t xc_video_start(uint16_t type, const uint8_t key[32], uint16_t *out_por
         xTaskCreatePinnedToCore(video_task, ch->display ? "xc_vid_cluster" : "xc_vid_main", 8192,
                                 ch, 5, &ch->task, 0);
     }
+    static bool watch_started;
+    if (!watch_started) {
+        watch_started = true;
+        xTaskCreatePinnedToCore(fb_watch_task, "xc_fbwatch", 3072, NULL, 2, NULL, 0);
+    }
     ESP_LOGI(TAG, "ch%u listener on port %u (%s)", (unsigned)type, out_port ? *out_port : 0,
              ch->display ? "decode+display" : "drain");
     return ESP_OK;
@@ -532,7 +743,8 @@ void xc_video_lcd_selftest(void)
 {
     const int w = 480, h = 272;
     if (s_rgb == NULL) {
-        s_rgb = heap_caps_malloc(PANEL_W * PANEL_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_rgb = heap_caps_aligned_alloc(128, PANEL_W * PANEL_H * 2,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (s_annexb == NULL) {
         s_annexb = heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

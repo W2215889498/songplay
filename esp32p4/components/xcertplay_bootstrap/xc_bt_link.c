@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "xc_crypto.h"
 
@@ -48,10 +49,25 @@ static bool s_peer_synced;
  * interleave. */
 static SemaphoreHandle_t s_tx_lock;
 
+/* iAP2-over-CarPlay tunnel state: TX goes through the hook (AirPlay event
+ * channel), RX arrives via xc_link_tunnel_rx. The link task drains it. */
+static volatile bool s_tunnel;
+static volatile bool s_enter_req;
+static void (*s_tunnel_tx)(const uint8_t *data, size_t len);
+static StreamBufferHandle_t s_tunnel_rx_sb;
+static int64_t s_tunnel_deadline;
+
 /* ---- UART framing ----------------------------------------------------- */
 
 static void bridge_send(uint8_t type, const void *data, size_t len)
 {
+    if (type == FT_DATA && s_tunnel) {
+        /* Link bytes belong to the phone's iAP2 stream: tunnel them. */
+        if (s_tunnel_tx != NULL) {
+            s_tunnel_tx((const uint8_t *)data, len);
+        }
+        return;
+    }
     uint8_t hdr[4] = { FRAME_MAGIC, type, (uint8_t)(len & 0xff), (uint8_t)((len >> 8) & 0xff) };
     uart_write_bytes(BT_UART, hdr, sizeof(hdr));
     if (len > 0) {
@@ -145,6 +161,35 @@ static void link_send_sync(void)
     p[i++] = 11; p[i++] = 2; p[i++] = 1; /* EA session */
     p[i++] = 12; p[i++] = 1; p[i++] = 2; /* file transfer session */
     link_write_packet(CONTROL_SYNCHRONIZE, 0, INITIAL_SEQUENCE, p, i);
+}
+
+/* ---- iAP2-over-CarPlay tunnel ----------------------------------------- */
+
+void xc_link_set_tunnel_tx(void (*tx)(const uint8_t *data, size_t len))
+{
+    s_tunnel_tx = tx;
+}
+
+esp_err_t xc_link_enter_tunnel(void)
+{
+    if (s_tunnel || s_enter_req) {
+        return ESP_OK;
+    }
+    s_enter_req = true;
+    return ESP_OK;
+}
+
+void xc_link_tunnel_rx(const uint8_t *data, size_t len)
+{
+    if (!s_tunnel || s_tunnel_rx_sb == NULL || data == NULL || len == 0) {
+        return;
+    }
+    (void)xStreamBufferSend(s_tunnel_rx_sb, data, len, pdMS_TO_TICKS(100));
+}
+
+bool xc_link_in_tunnel(void)
+{
+    return s_tunnel;
 }
 
 static void link_handle_packet(uint8_t control, uint8_t seq, uint8_t data_session,
@@ -295,6 +340,7 @@ static void link_feed(const uint8_t *data, size_t len)
             if (s_hdr_len == HEADER_BYTES) {
                 uint16_t total = (uint16_t)((s_hdr[2] << 8) | s_hdr[3]);
                 if (csum(s_hdr, HEADER_BYTES) != 0 || total < HEADER_BYTES) {
+                    ESP_LOGW(TAG, "link rx bad header (ctl=0x%02x total=%u)", s_hdr[4], total);
                     s_ls = LS_DETECT;
                     s_marker_pos = 0;
                     break;
@@ -307,6 +353,8 @@ static void link_feed(const uint8_t *data, size_t len)
                 s_ls = (s_need > 0) ? LS_PAYLOAD : LS_HEADER;
                 if (s_need == 0) {
                     link_handle_packet(s_pending_ctl, s_pending_seq, s_pending_sess, NULL, 0);
+                    ESP_LOGI(TAG, "link rx ctl=0x%02x psn=%u ack=%u sess=%u len=0", s_pending_ctl,
+                             s_pending_seq, s_hdr[6], s_pending_sess);
                     s_hdr_len = 0;
                 }
             }
@@ -321,7 +369,14 @@ static void link_feed(const uint8_t *data, size_t len)
                     link_handle_packet(s_pending_ctl, s_pending_seq, s_pending_sess, s_payload, plen);
                     if ((s_pending_ctl & (uint8_t)~CONTROL_ACKNOWLEDGEMENT) == 0 && plen > 0) {
                         csm_offer(s_payload, plen);
+                    } else {
+                        ESP_LOGI(TAG, "link rx ctl=0x%02x psn=%u ack=%u sess=%u len=%u",
+                                 s_pending_ctl, s_pending_seq, s_hdr[6], s_pending_sess,
+                                 (unsigned)plen);
                     }
+                } else {
+                    ESP_LOGW(TAG, "link rx bad payload csum (ctl=0x%02x len=%u)", s_pending_ctl,
+                             (unsigned)s_payload_len);
                 }
                 s_payload_len = 0;
                 s_hdr_len = 0;
@@ -334,13 +389,62 @@ static void link_feed(const uint8_t *data, size_t len)
 
 /* ---- tasks ------------------------------------------------------------ */
 
+/* Runs in the link task: restart negotiation on the tunnel transport. */
+static void tunnel_apply(void)
+{
+    s_tunnel = true;
+    s_peer_synced = false;
+    s_writable = false;
+    s_seq = INITIAL_SEQUENCE;
+    s_ack = 0;
+    s_ls = LS_DETECT;
+    s_marker_pos = 0;
+    s_hdr_len = 0;
+    s_payload_len = 0;
+    s_csm_len = 0;
+    s_tunnel_deadline = esp_timer_get_time() / 1000 + 8000;
+    ESP_LOGI(TAG, "iAP2 moving to CarPlay tunnel");
+    /* Mirror LIVI's link engine: the marker first (the phone's detect state
+     * scans for it), then the SYN/LSP negotiate. */
+    bridge_send(FT_DATA, IAP2_MARKER, sizeof(IAP2_MARKER));
+    link_send_sync();
+    bridge_command(2); /* drop RFCOMM; the tunnel replaces it */
+}
+
+/* Runs in the link task: tunnel did not come up, fall back to Bluetooth. */
+static void tunnel_exit(void)
+{
+    s_tunnel = false;
+    s_peer_synced = false;
+    s_writable = false;
+    s_seq = INITIAL_SEQUENCE;
+    s_ack = 0;
+    s_ls = LS_DETECT;
+    s_marker_pos = 0;
+    s_hdr_len = 0;
+    s_payload_len = 0;
+    s_csm_len = 0;
+    s_tunnel_deadline = 0;
+    bridge_command(1); /* allow the bridge to reconnect RFCOMM */
+}
+
 static void uart_task(void *arg)
 {
     static uint8_t buf[2048];
     size_t used = 0;
     int64_t next_marker = 0;
     for (;;) {
-        int n = uart_read_bytes(BT_UART, buf + used, sizeof(buf) - used, pdMS_TO_TICKS(50));
+        /* Tunnel frames arrive from the RTSP task through the stream buffer;
+         * the short wait keeps their latency low (link ACKs are 500 ms). */
+        if (s_tunnel_rx_sb != NULL) {
+            static uint8_t tbuf[2048];
+            size_t tn = xStreamBufferReceive(s_tunnel_rx_sb, tbuf, sizeof(tbuf),
+                                             pdMS_TO_TICKS(5));
+            if (tn > 0) {
+                link_feed(tbuf, tn);
+            }
+        }
+        int n = uart_read_bytes(BT_UART, buf + used, sizeof(buf) - used, 0);
         if (n > 0) {
             used += (size_t)n;
         }
@@ -361,7 +465,9 @@ static void uart_task(void *arg)
             }
             uint8_t type = buf[1];
             if (type == FT_DATA) {
-                link_feed(buf + 4, len);
+                if (!s_tunnel) {
+                    link_feed(buf + 4, len);
+                }
             } else if (type == FT_EVT) {
                 char text[200];
                 size_t n2 = len < sizeof(text) - 1 ? len : sizeof(text) - 1;
@@ -371,31 +477,59 @@ static void uart_task(void *arg)
                 if (strstr(text, "iAP2 channel is") != NULL ||
                     strstr(text, "connected on rfcomm channel") != NULL) {
                     s_rfcomm_up = true;
-                    s_ls = LS_DETECT;
-                    s_marker_pos = 0;
+                    if (!s_tunnel) {
+                        s_ls = LS_DETECT;
+                        s_marker_pos = 0;
+                    }
                 } else if (strstr(text, "rfcomm closed") != NULL) {
                     s_rfcomm_up = false;
-                    s_writable = false;
-                    s_peer_synced = false;
-                    s_ls = LS_DETECT;
-                    s_marker_pos = 0;
+                    if (!s_tunnel) {
+                        s_writable = false;
+                        s_peer_synced = false;
+                        s_ls = LS_DETECT;
+                        s_marker_pos = 0;
+                    }
                 }
             }
             memmove(buf, buf + 4 + len, used - 4 - len);
             used -= 4 + len;
         }
 
-        /* Re-send the iAP2 marker every second until the phone answers. It is
-         * safe to send unconditionally: the bridge drops data while its RFCOMM
-         * channel is down, and xcertplay does exactly the same. */
+        /* Apply a pending handoff request. */
+        if (s_enter_req) {
+            s_enter_req = false;
+            tunnel_apply();
+        }
+
         int64_t now = esp_timer_get_time() / 1000;
+
+        /* Tunnel watchdog: fall back to Bluetooth if the phone never answers. */
+        if (s_tunnel && s_writable) {
+            s_tunnel_deadline = 0;
+        }
+        if (s_tunnel && !s_writable && s_tunnel_deadline != 0 && now >= s_tunnel_deadline) {
+            ESP_LOGW(TAG, "tunnel iAP2 not writable in time, falling back to BT");
+            tunnel_exit();
+        }
+
+        /* Keepalive: marker (BT) or negotiate retry (tunnel) until the link
+         * finishes its handshake; SYN retry once synced but not yet writable. */
         if (now >= next_marker) {
-            next_marker = now + 1000;
-            if (!s_peer_synced) {
-                bridge_send(FT_DATA, IAP2_MARKER, sizeof(IAP2_MARKER));
-            }
-            if (s_peer_synced && !s_writable) {
-                link_send_sync();
+            next_marker = now + (s_tunnel ? 500 : 1000);
+            if (s_tunnel) {
+                if (!s_peer_synced) {
+                    bridge_send(FT_DATA, IAP2_MARKER, sizeof(IAP2_MARKER));
+                }
+                if (!s_writable) {
+                    link_send_sync();
+                }
+            } else {
+                if (!s_peer_synced) {
+                    bridge_send(FT_DATA, IAP2_MARKER, sizeof(IAP2_MARKER));
+                }
+                if (s_peer_synced && !s_writable) {
+                    link_send_sync();
+                }
             }
         }
     }
@@ -406,6 +540,12 @@ esp_err_t xc_link_start(xc_csm_rx_cb_t on_message)
     s_rx_cb = on_message;
     if (s_tx_lock == NULL) {
         s_tx_lock = xSemaphoreCreateMutex();
+    }
+    if (s_tunnel_rx_sb == NULL) {
+        s_tunnel_rx_sb = xStreamBufferCreate(8192, 1);
+        if (s_tunnel_rx_sb == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     uart_config_t uc = {
