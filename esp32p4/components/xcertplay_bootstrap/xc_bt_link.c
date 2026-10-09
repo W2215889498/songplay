@@ -315,10 +315,18 @@ static size_t s_need;
 static uint8_t s_pending_ctl, s_pending_seq, s_pending_sess;
 EXT_RAM_BSS_ATTR static uint8_t s_payload[8192];
 static size_t s_payload_len;
+static int64_t s_payload_started_ms; /* parser watchdog */
 static size_t s_marker_pos;
+static uint32_t s_stat_frames; /* completed link frames */
+static uint32_t s_stat_drops;  /* frames rejected by the parser */
 
 static void link_feed(const uint8_t *data, size_t len)
 {
+    static uint32_t feed_dbg;
+    if (feed_dbg < 300 && len > 0) {
+        feed_dbg++;
+        ESP_LOGI(TAG, "feed %u state=%d first=%02x", (unsigned)len, (int)s_ls, data[0]);
+    }
     for (size_t i = 0; i < len; i++) {
         uint8_t b = data[i];
         switch (s_ls) {
@@ -340,6 +348,7 @@ static void link_feed(const uint8_t *data, size_t len)
             if (s_hdr_len == HEADER_BYTES) {
                 uint16_t total = (uint16_t)((s_hdr[2] << 8) | s_hdr[3]);
                 if (csum(s_hdr, HEADER_BYTES) != 0 || total < HEADER_BYTES) {
+                    s_stat_drops++;
                     ESP_LOGW(TAG, "link rx bad header (ctl=0x%02x total=%u)", s_hdr[4], total);
                     s_ls = LS_DETECT;
                     s_marker_pos = 0;
@@ -350,6 +359,15 @@ static void link_feed(const uint8_t *data, size_t len)
                 s_pending_sess = s_hdr[7];
                 s_need = total - HEADER_BYTES;
                 s_payload_len = 0;
+                if (s_need > sizeof(s_payload)) {
+                    s_stat_drops++;
+                    ESP_LOGW(TAG, "link rx oversize frame (total=%u, cap %u), resync",
+                             (unsigned)total, (unsigned)sizeof(s_payload));
+                    s_ls = LS_DETECT;
+                    s_marker_pos = 0;
+                    break;
+                }
+                s_payload_started_ms = esp_timer_get_time() / 1000;
                 s_ls = (s_need > 0) ? LS_PAYLOAD : LS_HEADER;
                 if (s_need == 0) {
                     link_handle_packet(s_pending_ctl, s_pending_seq, s_pending_sess, NULL, 0);
@@ -364,10 +382,13 @@ static void link_feed(const uint8_t *data, size_t len)
                 s_payload[s_payload_len++] = b;
             }
             if (s_payload_len == s_need) {
+                s_payload_started_ms = 0;
                 if (csum(s_payload, s_payload_len) == 0) {
+                    s_stat_frames++;
                     size_t plen = s_payload_len - 1; /* strip payload checksum */
                     link_handle_packet(s_pending_ctl, s_pending_seq, s_pending_sess, s_payload, plen);
                     if ((s_pending_ctl & (uint8_t)~CONTROL_ACKNOWLEDGEMENT) == 0 && plen > 0) {
+                        ESP_LOGI(TAG, "link rx data psn=%u len=%u", s_pending_seq, (unsigned)plen);
                         csm_offer(s_payload, plen);
                     } else {
                         ESP_LOGI(TAG, "link rx ctl=0x%02x psn=%u ack=%u sess=%u len=%u",
@@ -375,6 +396,7 @@ static void link_feed(const uint8_t *data, size_t len)
                                  (unsigned)plen);
                     }
                 } else {
+                    s_stat_drops++;
                     ESP_LOGW(TAG, "link rx bad payload csum (ctl=0x%02x len=%u)", s_pending_ctl,
                              (unsigned)s_payload_len);
                 }
@@ -433,6 +455,7 @@ static void uart_task(void *arg)
     static uint8_t buf[2048];
     size_t used = 0;
     int64_t next_marker = 0;
+    int64_t next_stats = 0;
     for (;;) {
         /* Tunnel frames arrive from the RTSP task through the stream buffer;
          * the short wait keeps their latency low (link ACKs are 500 ms). */
@@ -465,6 +488,14 @@ static void uart_task(void *arg)
             }
             uint8_t type = buf[1];
             if (type == FT_DATA) {
+                static uint32_t rx_dbg;
+                if (rx_dbg < 150) {
+                    rx_dbg++;
+                    ESP_LOGI(TAG, "FT_DATA %u: %02x %02x %02x %02x %02x %02x %02x %02x", (unsigned)len,
+                             len > 0 ? buf[4] : 0, len > 1 ? buf[5] : 0, len > 2 ? buf[6] : 0,
+                             len > 3 ? buf[7] : 0, len > 4 ? buf[8] : 0, len > 5 ? buf[9] : 0,
+                             len > 6 ? buf[10] : 0, len > 7 ? buf[11] : 0);
+                }
                 if (!s_tunnel) {
                     link_feed(buf + 4, len);
                 }
@@ -477,7 +508,13 @@ static void uart_task(void *arg)
                 if (strstr(text, "iAP2 channel is") != NULL ||
                     strstr(text, "connected on rfcomm channel") != NULL) {
                     s_rfcomm_up = true;
-                    if (!s_tunnel) {
+                    /* This confirmation arrives ~2 s after the SPP opens, which
+                     * can be well into (or past) the iAP2 handshake. Only a
+                     * fresh, not-yet-negotiated channel may reset the parser:
+                     * resetting a synced link deafened it (all phone frames
+                     * silently swallowed in LS_DETECT) and left iOS retrans-
+                     * mitting forever -- the cold-boot connect bug. */
+                    if (!s_tunnel && !s_peer_synced) {
                         s_ls = LS_DETECT;
                         s_marker_pos = 0;
                     }
@@ -495,6 +532,19 @@ static void uart_task(void *arg)
             used -= 4 + len;
         }
 
+        /* Parser watchdog: a link frame that never completes would silently
+         * deafen the iAP2 channel (the phone then retransmits forever). */
+        if (s_ls == LS_PAYLOAD && s_payload_started_ms != 0 &&
+            esp_timer_get_time() / 1000 - s_payload_started_ms > 1500) {
+            ESP_LOGW(TAG, "link rx stuck mid-frame (need %u, got %u), resyncing",
+                     (unsigned)s_need, (unsigned)s_payload_len);
+            s_ls = LS_DETECT;
+            s_marker_pos = 0;
+            s_hdr_len = 0;
+            s_payload_len = 0;
+            s_payload_started_ms = 0;
+        }
+
         /* Apply a pending handoff request. */
         if (s_enter_req) {
             s_enter_req = false;
@@ -510,6 +560,14 @@ static void uart_task(void *arg)
         if (s_tunnel && !s_writable && s_tunnel_deadline != 0 && now >= s_tunnel_deadline) {
             ESP_LOGW(TAG, "tunnel iAP2 not writable in time, falling back to BT");
             tunnel_exit();
+        }
+
+        /* Debug stats: frame counters + parser state, every 30 s. */
+        if (now >= next_stats) {
+            next_stats = now + 30000;
+            ESP_LOGI(TAG, "link stats: frames=%u drops=%u state=%d synced=%d writable=%d",
+                     (unsigned)s_stat_frames, (unsigned)s_stat_drops, (int)s_ls,
+                     (int)s_peer_synced, (int)s_writable);
         }
 
         /* Keepalive: marker (BT) or negotiate retry (tunnel) until the link

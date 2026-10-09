@@ -189,8 +189,8 @@ esp_err_t xc_airplay_build_info(uint8_t *buf, size_t cap, size_t *out_len)
     n = push(b, dk2, dv2, n, "maxFPS", xc_bplist_int(b, 60));
     n = push(b, dk2, dv2, n, "widthPixels", xc_bplist_int(b, 240));
     n = push(b, dk2, dv2, n, "heightPixels", xc_bplist_int(b, 400));
-    n = push(b, dk2, dv2, n, "widthPhysical", xc_bplist_int(b, 12));
-    n = push(b, dk2, dv2, n, "heightPhysical", xc_bplist_int(b, 19));
+    n = push(b, dk2, dv2, n, "widthPhysical", xc_bplist_int(b, 6));
+    n = push(b, dk2, dv2, n, "heightPhysical", xc_bplist_int(b, 8));
     n = push(b, dk2, dv2, n, "features", xc_bplist_int(b, 0x0a));
     n = push(b, dk2, dv2, n, "primaryInputDevice", xc_bplist_int(b, 1));
     /* Per-display view area (LIVI builds one areaDict per display): the cluster
